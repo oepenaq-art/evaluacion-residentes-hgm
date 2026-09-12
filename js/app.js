@@ -2,11 +2,16 @@ import { rubricasData } from './rubricas-data.js';
 import { 
     auth, 
     db, 
+    firebaseConfig,
     isFirebaseConfigured,
+    initializeApp,
+    getApp,
+    getAuth,
     signInWithEmailAndPassword, 
     signOut, 
     onAuthStateChanged, 
     sendPasswordResetEmail,
+    createUserWithEmailAndPassword,
     collection, 
     getDocs, 
     addDoc, 
@@ -42,6 +47,7 @@ const rubricasContainer = document.getElementById('rubricas-container');
 const btnRubricas = document.querySelectorAll('.btn-rubrica');
 const btnInformes = document.getElementById('btn-informes');
 const btnAdminEstudiantes = document.getElementById('btn-admin-estudiantes');
+const btnAdminUsuarios = document.getElementById('btn-admin-usuarios');
 
 // Formulario
 const btnVolverDash = document.getElementById('btn-volver-dash');
@@ -68,7 +74,8 @@ let appState = {
     programaSeleccionado: null,
     estudianteSeleccionado: null,
     rubricaSeleccionada: null,
-    estudiantes: []
+    estudiantes: [],
+    usuarios: []
 };
 
 // --- NAVEGACIÓN ---
@@ -90,18 +97,20 @@ if (auth) {
             let userRol = 'docente';
             try {
                 const usuariosRef = collection(db, 'usuarios');
-                const q = query(usuariosRef, where('correo', '==', user.email));
+                const q = query(usuariosRef, where('correo', '==', user.email.toLowerCase().trim()));
                 const querySnapshot = await getDocs(q);
                 if (!querySnapshot.empty) {
                     const userData = querySnapshot.docs[0].data();
-                    if (userData.rol === 'Coordinador' || userData.Rol === 'Coordinador' || userData.rol === 'coordinador') {
+                    const r = (userData.rol || userData.Rol || '').toLowerCase().trim();
+                    if (r === 'coordinador' || r === 'administrador') {
                         userRol = 'coordinador';
                     }
                 }
             } catch (error) {
                 console.error('Error al verificar rol de usuario en HGM:', error);
-                // Fallback
-                if (user.email.toLowerCase().includes('coord')) userRol = 'coordinador';
+                if (user.email.toLowerCase().includes('coord') || user.email.toLowerCase().includes('admin')) {
+                    userRol = 'coordinador';
+                }
             }
 
             appState.user = {
@@ -117,9 +126,11 @@ if (auth) {
             if (appState.user.rol === 'coordinador') {
                 btnInformes.classList.remove('hidden');
                 if (btnAdminEstudiantes) btnAdminEstudiantes.classList.remove('hidden');
+                if (btnAdminUsuarios) btnAdminUsuarios.classList.remove('hidden');
             } else {
                 btnInformes.classList.add('hidden');
                 if (btnAdminEstudiantes) btnAdminEstudiantes.classList.add('hidden');
+                if (btnAdminUsuarios) btnAdminUsuarios.classList.add('hidden');
             }
 
             await cargarEstudiantesDesdeFirestore();
@@ -284,7 +295,6 @@ btnProgramas.forEach(btn => {
         
         appState.programaSeleccionado = btn.dataset.prog;
 
-        // Asegurar que la lista de estudiantes se descargue de Firestore si está vacía
         if (!appState.estudiantes || appState.estudiantes.length === 0) {
             await cargarEstudiantesDesdeFirestore();
         }
@@ -329,7 +339,6 @@ btnRubricas.forEach(btn => {
 // --- LÓGICA DEL FORMULARIO ---
 btnVolverDash.addEventListener('click', () => showSection('dashboard'));
 
-// Función auxiliar para obtener títulos de los niveles según la rúbrica
 function getNombreNivel(val, esRonda) {
     if (esRonda) {
         if (val === 4) return 'Sobresaliente (4.1 - 5.0)';
@@ -461,7 +470,6 @@ function renderizarFormulario() {
     itemsRubrica.innerHTML = '';
 
     dataRubrica.items.forEach(item => {
-        // Generar botones de nivel
         const botonesNivelesHtml = item.opciones.slice().reverse().map(op => {
             let colorClase = 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300';
             if (op.valor === 5) colorClase = 'hover:bg-green-600 hover:text-white border-green-600 text-green-800 bg-green-50';
@@ -480,7 +488,6 @@ function renderizarFormulario() {
             `;
         }).join('');
 
-        // Botón No Aplica
         const botonNoAplicaHtml = `
             <button type="button" 
                 class="btn-nivel-opcion border font-semibold py-2 px-3 rounded-lg text-xs transition duration-150 shadow-sm bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-600 hover:text-white"
@@ -490,13 +497,11 @@ function renderizarFormulario() {
             </button>
         `;
 
-        // Guía explicativa inline
         const guiaTextoHtml = item.opciones.slice().reverse().map(op => {
             const descripcionCorta = op.texto.replace(/^[A-ZÁÉÍÓÚ\s\(\)\d]+:\s*/i, '');
             return `${getPrefijoGuia(op.valor, esRonda)} ${descripcionCorta}`;
         }).join(' <span class="text-gray-300 font-bold mx-1.5">|</span> ');
 
-        // Sección de nota: input numérico libre para Ronda, o hidden para Seminarios/Tema Central
         let inputNotaHtml = '';
         if (esRonda) {
             inputNotaHtml = `
@@ -547,7 +552,6 @@ function renderizarFormulario() {
         itemsRubrica.insertAdjacentHTML('beforeend', itemCardHtml);
     });
 
-    // Añadir eventos a los botones de niveles para actualizar automáticamente la nota
     document.querySelectorAll('.btn-nivel-opcion').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -557,11 +561,11 @@ function renderizarFormulario() {
 
             if (esRonda) {
                 let valorPorDefecto = 0.0;
-                if (valor === 4) valorPorDefecto = 5.0;       // Rango 4.1 - 5.0
-                else if (valor === 3) valorPorDefecto = 4.0;  // Rango 3.0 - 4.0
-                else if (valor === 2) valorPorDefecto = 2.9;  // Rango 1.0 - 2.9
-                else if (valor === 1) valorPorDefecto = 0.0;  // Insuficiente: 0
-                else valorPorDefecto = 0.0;                   // No aplica: 0
+                if (valor === 4) valorPorDefecto = 5.0;
+                else if (valor === 3) valorPorDefecto = 4.0;
+                else if (valor === 2) valorPorDefecto = 2.9;
+                else if (valor === 1) valorPorDefecto = 0.0;
+                else valorPorDefecto = 0.0;
 
                 if (input) input.value = valorPorDefecto.toFixed(1);
             } else {
@@ -655,7 +659,6 @@ btnInformes.addEventListener('click', () => {
         infSelectEstudiante.innerHTML += `<option value="${est.id}">${est.nombre} (${est.programa})</option>`;
     });
     
-    // Cargar clave guardada para HGM
     const claveGuardada = localStorage.getItem('gemini_api_key_hgm');
     if (claveGuardada && !infApiKey.value) {
         infApiKey.value = claveGuardada;
@@ -680,7 +683,6 @@ btnGenerarIa.addEventListener('click', async () => {
         return;
     }
 
-    // Recordar la clave en este dispositivo (independiente para HGM)
     localStorage.setItem('gemini_api_key_hgm', apiKey);
 
     const est = appState.estudiantes.find(e => e.id === estId);
@@ -689,7 +691,6 @@ btnGenerarIa.addEventListener('click', async () => {
     btnGenerarIa.disabled = true;
 
     try {
-        // Consultar evaluaciones del estudiante en Firestore
         let evaluacionesFiltradas = [];
         try {
             const q = query(collection(db, 'evaluaciones'), where('estudianteId', '==', estId));
@@ -716,7 +717,6 @@ btnGenerarIa.addEventListener('click', async () => {
             return;
         }
 
-        // Calcular promedios por tipo de rúbrica
         let sumRonda = 0, countRonda = 0;
         let sumSeminarios = 0, countSeminarios = 0;
         let sumTemaCentral = 0, countTemaCentral = 0;
@@ -737,7 +737,6 @@ btnGenerarIa.addEventListener('click', async () => {
         const promSeminarios = countSeminarios > 0 ? (sumSeminarios / countSeminarios) : 0;
         const promTemaCentral = countTemaCentral > 0 ? (sumTemaCentral / countTemaCentral) : 0;
         
-        // Ponderación institucional: 40% ronda, 35% seminarios, 20% tema central, 5% autoevaluación
         const notaFinalDefinitiva = (promRonda * 0.40) + (promSeminarios * 0.35) + (promTemaCentral * 0.20) + (notaAuto * 0.05);
 
         const promptText = `Actúa como el Coordinador Académico del Departamento de Pediatría del Hospital General de Medellín (Luz Castro de Gutiérrez E.S.E.).
@@ -765,7 +764,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
 5. Si el promedio es menor a 3.6, enfatiza en un tono constructivo pero firme las áreas críticas a mejorar.
 6. NO incluyas saludos, títulos, HTML ni despedidas, ve directo al texto del informe en texto plano.`;
 
-        // 1. Validar modelos disponibles dinámicamente
         const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
         if (!modelsRes.ok) {
             let errorDetalle = `Error ${modelsRes.status}`;
@@ -789,7 +787,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
 
         availableModels.sort((a, b) => b.name.localeCompare(a.name));
 
-        // 2. Generar síntesis
         let textoIA = null;
         let selectedModel = null;
         let ultimoError = null;
@@ -847,7 +844,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
                 <div style="text-align: center; margin-bottom: 20px; color: #16a34a; font-weight: bold; padding: 10px; background: #dcfce7; border-radius: 8px;">
                     ✅ ¡Informe generado con éxito! Tu documento de Word se descargará automáticamente.
                 </div>
-                <!-- Encabezado Institucional -->
                 <div style="text-align: center; margin-bottom: 30px;">
                     <h2 style="color: #005A9C; margin: 0; font-size: 22px; font-weight: bold;">HOSPITAL GENERAL DE MEDELLÍN</h2>
                     <h3 style="color: #333; margin: 5px 0; font-size: 16px;">Luz Castro de Gutiérrez E.S.E.</h3>
@@ -856,7 +852,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
                     <h2 style="color: #005A9C; margin: 15px 0; font-size: 20px; font-weight: bold;">INFORME FINAL CONSOLIDADO DE ROTACIÓN</h2>
                 </div>
 
-                <!-- Datos del residente -->
                 <div style="margin-bottom: 25px; line-height: 1.8; font-size: 14px; background: #f8fafc; padding: 15px; border-radius: 8px;">
                     <p style="margin:0;"><strong>Residente / Fellow:</strong> ${est.nombre}</p>
                     <p style="margin:0;"><strong>Programa:</strong> ${est.programa.toUpperCase()}</p>
@@ -864,7 +859,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
                     <p style="margin:0;"><strong>Período evaluado:</strong> ${periodoEval}</p>
                 </div>
 
-                <!-- Tabla de Calificaciones -->
                 <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 15px; text-transform: uppercase;">Calificación Promedio por Componentes</h3>
                 <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 13px;">
                     <thead>
@@ -898,20 +892,17 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
                     </tbody>
                 </table>
 
-                <!-- Nota Definitiva -->
                 <div style="text-align: center; margin: 30px 0; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 8px;">
                     <h2 style="margin: 0; color: ${colorNota}; font-size: 18px;">
                         NOTA DEFINITIVA: ${notaFinalDefinitiva.toFixed(2)} / 5.0 — ${calificacionCualitativa}
                     </h2>
                 </div>
 
-                <!-- Síntesis Cualitativa de Gemini -->
                 <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Síntesis Cualitativa del Desempeño</h3>
                 <div style="font-size: 13.5px; text-align: justify; margin-bottom: 30px; line-height: 1.6;">
                     ${parrafosHTML}
                 </div>
 
-                <!-- Comentarios originales -->
                 <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Síntesis de Comentarios de los Docentes</h3>
                 <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #005A9C; font-size: 13px; margin-bottom: 60px; line-height: 1.6;">
                     ${resumenFeedbackCualitativo ? resumenFeedbackCualitativo.replace(/\n/g, '<br>') : '<em>No hay comentarios cualitativos registrados en el período evaluado.</em>'}
@@ -920,7 +911,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
         `;
         infResultado.classList.remove('hidden');
 
-        // DESCARGA AUTOMÁTICA EN FORMATO WORD
         try {
             lastWordData = [
                 est,
@@ -946,9 +936,6 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
     }
 });
 
-/**
- * Función auxiliar para generar y descargar documento Word oficial de HGM
- */
 async function descargarInformeWord(est, rotacion, fechas, notas, textoIA, comentariosDocentes, modeloUsado) {
     if (!window.docx) {
         throw new Error('La librería docx no se ha cargado en el navegador.');
@@ -1002,7 +989,6 @@ async function descargarInformeWord(est, rotacion, fechas, notas, textoIA, comen
         ]})
     );
 
-    // Datos del residente
     const infoResidente = [
         new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: 'Residente / Fellow: ', bold: true, size: 22 }), new TextRun({ text: est.nombre, size: 22 })] }),
         new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: 'Programa: ', bold: true, size: 22 }), new TextRun({ text: est.programa.toUpperCase(), size: 22 })] }),
@@ -1010,7 +996,6 @@ async function descargarInformeWord(est, rotacion, fechas, notas, textoIA, comen
         new Paragraph({ spacing: { after: 400 }, children: [new TextRun({ text: 'Período evaluado: ', bold: true, size: 22 }), new TextRun({ text: fechas, size: 22 })] }),
     ];
 
-    // Tabla de Notas
     const tableHeader = new TableRow({
         tableHeader: true,
         children: [
@@ -1153,23 +1138,23 @@ async function abrirModalGestionEstudiantes() {
     const modalHtml = `
         <div class="text-left space-y-4">
             <div class="bg-gray-50 p-3 rounded border">
-                <h4 class="font-bold text-sm text-[#0056b3] mb-2">➕ Agregar Nuevo Estudiante</h4>
+                <h4 class="font-bold text-sm text-[#0056b3] mb-2">➕ Agregar Nuevo Residente o Fellow</h4>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                    <input type="text" id="nuevo-est-nombre" placeholder="Nombre completo (ej. Dr. Carlos Gómez)" class="border rounded p-2 text-sm w-full">
+                    <input type="text" id="nuevo-est-nombre" placeholder="Nombre completo (ej. Dra. Laura Gómez)" class="border rounded p-2 text-sm w-full">
                     <select id="nuevo-est-programa" class="border rounded p-2 text-sm w-full bg-white">
                         <option value="residente">Residente de Pediatría</option>
                         <option value="fellow">Fellow de Cuidado Intensivo</option>
                     </select>
                 </div>
-                <button id="btn-guardar-nuevo-est" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded text-sm transition">
-                    Guardar en Base de Datos
+                <button id="btn-guardar-nuevo-est" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded text-sm transition shadow-sm">
+                    Guardar Residente en Base de Datos
                 </button>
             </div>
 
             <div>
-                <h4 class="font-bold text-sm text-gray-700 mb-2">📋 Lista Actual de Estudiantes (HGM):</h4>
+                <h4 class="font-bold text-sm text-gray-700 mb-2">📋 Lista Actual de Residentes y Fellows (HGM):</h4>
                 <div class="max-h-48 overflow-y-auto border rounded bg-white p-2 divide-y">
-                    ${listaHtml || '<p class="text-xs text-gray-400 p-2">No hay estudiantes registrados.</p>'}
+                    ${listaHtml || '<p class="text-xs text-gray-400 p-2">No hay residentes registrados aún.</p>'}
                 </div>
             </div>
         </div>
@@ -1191,7 +1176,7 @@ async function abrirModalGestionEstudiantes() {
                 const programa = selectProg.value;
 
                 if (!nombre) {
-                    Swal.showValidationMessage('Por favor escribe el nombre del estudiante');
+                    Swal.showValidationMessage('Por favor escribe el nombre del residente');
                     return;
                 }
 
@@ -1205,7 +1190,7 @@ async function abrirModalGestionEstudiantes() {
                     
                     Swal.fire({
                         icon: 'success',
-                        title: 'Estudiante Agregado',
+                        title: 'Residente Agregado',
                         toast: true,
                         position: 'top-end',
                         showConfirmButton: false,
@@ -1220,7 +1205,7 @@ async function abrirModalGestionEstudiantes() {
 
                 } catch (err) {
                     console.error('Error al agregar estudiante:', err);
-                    Swal.fire('Error', 'No se pudo guardar el estudiante en Firebase.', 'error');
+                    Swal.fire('Error', 'No se pudo guardar el residente en Firebase.', 'error');
                 }
             });
 
@@ -1228,7 +1213,7 @@ async function abrirModalGestionEstudiantes() {
                 btn.addEventListener('click', async (e) => {
                     const estId = e.target.dataset.id;
                     const confirm = await Swal.fire({
-                        title: '¿Eliminar estudiante?',
+                        title: '¿Eliminar residente?',
                         text: 'Esta acción no se puede deshacer.',
                         icon: 'warning',
                         showCancelButton: true,
@@ -1248,6 +1233,213 @@ async function abrirModalGestionEstudiantes() {
                         } catch (err) {
                             console.error('Error al eliminar:', err);
                             Swal.fire('Error', 'No se pudo eliminar de Firebase.', 'error');
+                        }
+                    }
+                });
+            });
+        }
+    });
+}
+
+// --- GESTIÓN DE USUARIOS: DOCENTES Y ADMINISTRADORES (COORDINADOR) ---
+if (btnAdminUsuarios) {
+    btnAdminUsuarios.addEventListener('click', async () => {
+        await abrirModalGestionUsuarios();
+    });
+}
+
+async function cargarUsuariosDesdeFirestore() {
+    if (!db) return;
+    try {
+        const querySnapshot = await getDocs(collection(db, 'usuarios'));
+        appState.usuarios = [];
+        querySnapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            appState.usuarios.push({
+                id: docSnap.id,
+                correo: (data.correo || data.email || '').toLowerCase().trim(),
+                rol: (data.rol || data.Rol || 'docente').toLowerCase().trim(),
+                ...data
+            });
+        });
+    } catch (error) {
+        console.error('Error al consultar usuarios:', error);
+    }
+}
+
+async function abrirModalGestionUsuarios() {
+    Swal.fire({
+        title: 'Cargando lista de docentes y administradores...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    await cargarUsuariosDesdeFirestore();
+
+    const listaHtml = appState.usuarios.map(u => {
+        const esCoord = (u.rol === 'coordinador' || u.rol === 'administrador');
+        const badgeColor = esCoord ? 'bg-indigo-100 text-indigo-800 border-indigo-200' : 'bg-blue-100 text-blue-800 border-blue-200';
+        const rolTexto = esCoord ? 'Coordinador / Admin' : 'Docente Evaluador';
+
+        return `
+            <div class="flex justify-between items-center p-2.5 border-b text-sm">
+                <div class="text-left">
+                    <span class="font-medium text-gray-800">${u.correo}</span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full border font-bold ml-2 ${badgeColor}">${rolTexto}</span>
+                </div>
+                <button class="btn-eliminar-usuario text-red-500 hover:text-red-700 text-xs px-2 py-1 font-bold" data-id="${u.id}" data-correo="${u.correo}">Eliminar</button>
+            </div>
+        `;
+    }).join('');
+
+    const modalHtml = `
+        <div class="text-left space-y-4">
+            <div class="bg-gray-50 p-3.5 rounded-lg border border-gray-200">
+                <h4 class="font-bold text-sm text-[#0056b3] mb-2 flex items-center gap-1">
+                    <span>➕</span> Registrar Nuevo Docente o Administrador
+                </h4>
+                <div class="space-y-2 mb-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 mb-0.5">Correo Electrónico:</label>
+                        <input type="email" id="nuevo-user-email" placeholder="ejemplo@hgm.gov.co" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500">
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-0.5">Contraseña Inicial:</label>
+                            <input type="password" id="nuevo-user-password" placeholder="Mínimo 6 caracteres" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-0.5">Rol en la Plataforma:</label>
+                            <select id="nuevo-user-rol" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500 font-medium">
+                                <option value="docente">Docente Evaluador</option>
+                                <option value="coordinador">Coordinador (Administrador)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <button id="btn-guardar-nuevo-user" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded text-sm transition shadow-sm">
+                    Crear y Autorizar Usuario
+                </button>
+            </div>
+
+            <div>
+                <h4 class="font-bold text-sm text-gray-700 mb-2">📋 Usuarios Registrados en el Sistema:</h4>
+                <div class="max-h-52 overflow-y-auto border rounded bg-white p-2 divide-y">
+                    ${listaHtml || '<p class="text-xs text-gray-400 p-2">No hay usuarios registrados aún.</p>'}
+                </div>
+            </div>
+        </div>
+    `;
+
+    Swal.fire({
+        title: 'Gestión de Docentes y Coordinadores - HGM',
+        html: modalHtml,
+        width: '580px',
+        showConfirmButton: false,
+        showCloseButton: true,
+        didOpen: () => {
+            const btnGuardar = document.getElementById('btn-guardar-nuevo-user');
+            const inputEmail = document.getElementById('nuevo-user-email');
+            const inputPassword = document.getElementById('nuevo-user-password');
+            const selectRol = document.getElementById('nuevo-user-rol');
+
+            btnGuardar.addEventListener('click', async () => {
+                const email = inputEmail.value.trim().toLowerCase();
+                const password = inputPassword.value;
+                const rol = selectRol.value;
+
+                if (!email || !email.includes('@')) {
+                    Swal.showValidationMessage('Ingresa un correo electrónico válido');
+                    return;
+                }
+                if (!password || password.length < 6) {
+                    Swal.showValidationMessage('La contraseña debe tener mínimo 6 caracteres');
+                    return;
+                }
+
+                btnGuardar.disabled = true;
+                btnGuardar.innerHTML = '<span>⏳</span> Creando usuario en Firebase...';
+
+                try {
+                    // Instancia secundaria para NO cerrar la sesión activa del coordinador actual
+                    let secondaryApp;
+                    try {
+                        secondaryApp = initializeApp(firebaseConfig, "SecondaryAuth");
+                    } catch (e) {
+                        secondaryApp = getApp("SecondaryAuth");
+                    }
+
+                    const secondaryAuth = getAuth(secondaryApp);
+                    let uid = null;
+
+                    try {
+                        const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+                        uid = cred.user.uid;
+                        await signOut(secondaryAuth);
+                    } catch (authErr) {
+                        if (authErr.code === 'auth/email-already-in-use') {
+                            console.log('El correo ya existe en Firebase Authentication, registrando rol en Firestore...');
+                        } else {
+                            throw authErr;
+                        }
+                    }
+
+                    // Guardar rol en Firestore
+                    await addDoc(collection(db, 'usuarios'), {
+                        correo: email,
+                        rol: rol,
+                        uid: uid || null,
+                        institucion: "Hospital General de Medellín",
+                        createdAt: serverTimestamp()
+                    });
+
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Usuario Creado y Autorizado',
+                        text: `${email} ahora puede ingresar con su contraseña como ${rol === 'coordinador' ? 'Coordinador' : 'Docente'}.`,
+                        confirmButtonColor: '#0056b3'
+                    }).then(() => {
+                        abrirModalGestionUsuarios();
+                    });
+
+                } catch (err) {
+                    console.error('Error al registrar usuario:', err);
+                    let msg = err.message || 'Error desconocido';
+                    if (err.code === 'auth/email-already-in-use') msg = 'El correo ya está registrado en Firebase Authentication.';
+                    Swal.fire('Error', 'No se pudo crear el usuario: ' + msg, 'error');
+                }
+            });
+
+            document.querySelectorAll('.btn-eliminar-usuario').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const userId = e.target.dataset.id;
+                    const userEmail = e.target.dataset.correo;
+
+                    const confirm = await Swal.fire({
+                        title: '¿Revocar acceso?',
+                        text: `Se eliminarán los permisos de ${userEmail}.`,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'Sí, revocar',
+                        cancelButtonText: 'Cancelar',
+                        confirmButtonColor: '#d33'
+                    });
+
+                    if (confirm.isConfirmed) {
+                        try {
+                            await deleteDoc(doc(db, 'usuarios', userId));
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Acceso Revocado',
+                                toast: true,
+                                position: 'top-end',
+                                showConfirmButton: false,
+                                timer: 2000
+                            });
+                            abrirModalGestionUsuarios();
+                        } catch (err) {
+                            console.error('Error al eliminar usuario:', err);
+                            Swal.fire('Error', 'No se pudo eliminar de Firestore.', 'error');
                         }
                     }
                 });

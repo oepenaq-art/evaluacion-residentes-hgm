@@ -1,17 +1,33 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
-import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+import { initializeApp, getApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+import { 
+    getAuth, 
+    signInWithEmailAndPassword, 
+    signOut, 
+    onAuthStateChanged, 
+    sendPasswordResetEmail,
+    createUserWithEmailAndPassword 
+} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+import { 
+    getFirestore, 
+    collection, 
+    getDocs, 
+    addDoc, 
+    deleteDoc, 
+    doc, 
+    query, 
+    where, 
+    serverTimestamp 
+} from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
 
 /**
  * CONFIGURACIÓN DE FIREBASE PARA: HOSPITAL GENERAL DE MEDELLÍN (HGM)
  * 
  * INSTRUCCIONES:
  * 1. Ve a Firebase Console: https://console.firebase.google.com/
- * 2. Crea un proyecto nuevo (ejemplo: "evaluacion-residentes-hgm").
- * 3. En la vista principal del proyecto, añade una aplicación Web (ícono </>) y asígnale un apodo.
- * 4. Copia el objeto firebaseConfig generado por Firebase y reemplaza los valores a continuación.
+ * 2. En tu proyecto, añade una app Web (ícono </>) y copia el objeto firebaseConfig.
+ * 3. Pega tus credenciales reales aquí abajo.
  */
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "TU_API_KEY_AQUI",
   authDomain: "tu-proyecto-hgm.firebaseapp.com",
   projectId: "tu-proyecto-hgm",
@@ -42,12 +58,17 @@ try {
 }
 
 export {
+    app,
     auth,
     db,
+    initializeApp,
+    getApp,
+    getAuth,
     signInWithEmailAndPassword,
     signOut,
     onAuthStateChanged,
     sendPasswordResetEmail,
+    createUserWithEmailAndPassword,
     collection,
     getDocs,
     addDoc,
