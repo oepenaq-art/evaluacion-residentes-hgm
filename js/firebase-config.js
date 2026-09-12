@@ -21,23 +21,18 @@ import {
 
 /**
  * CONFIGURACIÓN DE FIREBASE PARA: HOSPITAL GENERAL DE MEDELLÍN (HGM)
- * 
- * INSTRUCCIONES:
- * 1. Ve a Firebase Console: https://console.firebase.google.com/
- * 2. En tu proyecto, añade una app Web (ícono </>) y copia el objeto firebaseConfig.
- * 3. Pega tus credenciales reales aquí abajo.
  */
 export const firebaseConfig = {
-  apiKey: "TU_API_KEY_AQUI",
-  authDomain: "tu-proyecto-hgm.firebaseapp.com",
-  projectId: "tu-proyecto-hgm",
-  storageBucket: "tu-proyecto-hgm.firebasestorage.app",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:abcdef1234567890",
-  measurementId: "G-XXXXXXXXXX"
+  apiKey: "AIzaSyDtxe_fELRPufWlvg06rxQAsg7uI0-eQiI",
+  authDomain: "hgm-evaluacion-residentes.firebaseapp.com",
+  projectId: "hgm-evaluacion-residentes",
+  storageBucket: "hgm-evaluacion-residentes.firebasestorage.app",
+  messagingSenderId: "89583168934",
+  appId: "1:89583168934:web:e0f05819c84107558af367",
+  measurementId: "G-F6RG5VCY93"
 };
 
-// Verificación inicial de configuración
+// Verificación de configuración activa
 export const isFirebaseConfigured = () => {
     return firebaseConfig.apiKey && 
            !firebaseConfig.apiKey.includes("TU_API_KEY") && 
