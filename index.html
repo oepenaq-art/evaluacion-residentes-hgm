@@ -1,208 +1,302 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" class="h-full">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
+    <meta name="theme-color" content="#0056b3">
+    <meta name="description" content="Sistema de Evaluación de Residentes y Fellows - Hospital General de Medellín">
     <title>Calificación Residentes y Fellows - Hospital General de Medellín</title>
-    <!-- Tailwind CSS -->
+    
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- SweetAlert2 -->
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
     <style>
-        .bg-hospital {
+        /* Capa de fondo fija para evitar fallos de renderizado en Safari iOS y Android Chrome */
+        #bg-fixed {
             background-image: url('assets/hospital-bg.jpg');
             background-size: cover;
             background-position: center;
-            background-attachment: fixed;
+            background-repeat: no-repeat;
         }
+
         .glass-card {
-            background: rgba(245, 245, 245, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 1rem;
-            box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: 1.25rem;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.35);
         }
-        /* Custom radio buttons styles */
-        .radio-btn-group input[type="radio"]:checked + label {
-            background-color: #0284c7; /* light blue-600 */
-            color: white;
-            border-color: #0284c7;
+
+        /* Evitar zoom automático molesto en iPhone/iPad (iOS Safari) al enfocar campos de texto */
+        @media (max-width: 768px) {
+            input, select, textarea {
+                font-size: 16px !important;
+            }
+        }
+
+        /* Toque suave en móviles */
+        html {
+            -webkit-tap-highlight-color: transparent;
+            scroll-behavior: smooth;
+        }
+
+        /* Barra de desplazamiento suave */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
         }
     </style>
 </head>
-<body class="bg-hospital min-h-screen font-sans flex flex-col relative">
+<body class="relative min-h-full font-sans flex flex-col text-gray-800 antialiased selection:bg-blue-600 selection:text-white">
     
-    <!-- Overlay oscuro para dar contraste y legibilidad -->
-    <div class="absolute inset-0 bg-black/50 z-0"></div>
+    <!-- Fondo fijo desacoplado del scroll (Solución definitiva para fallos móviles) -->
+    <div id="bg-fixed" class="fixed inset-0 z-0 pointer-events-none"></div>
+    <div class="fixed inset-0 z-0 bg-slate-950/65 backdrop-blur-[1.5px] pointer-events-none"></div>
 
-    <!-- Contenedor Principal (z-10 para estar sobre el overlay) -->
-    <div class="relative z-10 flex-grow flex flex-col items-center justify-center p-4 py-10">
+    <!-- Contenedor Principal (z-10 para estar sobre el fondo) -->
+    <div class="relative z-10 flex-grow flex flex-col items-center justify-center p-3 sm:p-6 py-6 sm:py-10 max-w-full">
         
         <!-- Header (Logo y Título Institucional) -->
-        <div class="text-center mb-8 flex flex-col items-center">
-            <div class="bg-white px-6 py-2 rounded-xl shadow-lg mb-4 inline-block">
-                <img src="assets/logo.jpg" alt="Logo Hospital General de Medellín" class="h-24 object-contain">
+        <header class="text-center mb-5 sm:mb-8 flex flex-col items-center w-full max-w-3xl px-2">
+            <div class="bg-white/95 px-5 py-2.5 rounded-2xl shadow-xl mb-3 sm:mb-4 inline-block border border-white/50">
+                <img src="assets/logo.jpg" alt="Logo Hospital General de Medellín" class="h-16 sm:h-20 md:h-24 object-contain">
             </div>
-            <h1 class="text-3xl md:text-4xl font-bold text-white drop-shadow-lg">Evaluación de Residentes de Pediatría</h1>
-            <h2 class="text-xl text-gray-200 mt-2 drop-shadow-md">Hospital General de Medellín - Luz Castro de Gutiérrez</h2>
-        </div>
+            <h1 class="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white drop-shadow-md text-center leading-tight">
+                Evaluación de Residentes de Pediatría
+            </h1>
+            <h2 class="text-xs sm:text-sm md:text-base text-blue-100 mt-1 sm:mt-2 font-medium drop-shadow text-center">
+                Hospital General de Medellín - Luz Castro de Gutiérrez E.S.E.
+            </h2>
+        </header>
 
         <!-- SECTIONS CONTAINER (GLASS CARD) -->
-        <main class="glass-card w-full max-w-4xl p-4 sm:p-6 md:p-10 relative">
+        <main class="glass-card w-full max-w-4xl p-4 sm:p-6 md:p-10 relative transition-all duration-300">
             
-            <!-- User Info Bar (Barra superior ordenada sin superposiciones) -->
-            <div id="user-info" class="hidden flex flex-wrap justify-between items-center bg-blue-50/90 border border-blue-200 rounded-lg px-4 py-2.5 mb-6 shadow-sm">
-                <div class="flex items-center gap-2">
-                    <span class="text-base">👤</span>
-                    <span class="text-xs text-gray-500 font-medium">Sesión activa:</span>
-                    <span id="user-email" class="text-xs sm:text-sm font-bold text-gray-800"></span>
+            <!-- User Info Bar (Responsive sin colisiones de texto) -->
+            <div id="user-info" class="hidden flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-blue-50/90 border border-blue-200 rounded-xl px-4 py-2.5 mb-6 shadow-sm">
+                <div class="flex items-center gap-2 max-w-full overflow-hidden">
+                    <span class="text-base flex-shrink-0">👤</span>
+                    <span class="text-xs text-gray-500 font-medium flex-shrink-0">Sesión activa:</span>
+                    <span id="user-email" class="text-xs sm:text-sm font-bold text-gray-800 truncate"></span>
                 </div>
-                <button id="btn-logout" class="text-xs sm:text-sm text-red-600 hover:text-red-800 font-bold hover:underline flex items-center gap-1">
+                <button id="btn-logout" class="text-xs sm:text-sm text-red-600 hover:text-red-800 active:scale-95 font-bold hover:underline flex items-center gap-1 self-end sm:self-auto py-1 px-2">
                     <span>🚪</span> Cerrar Sesión
                 </button>
             </div>
 
             <!-- LOGIN -->
-            <section id="sec-login" class="block max-w-md mx-auto py-4 md:py-8">
-                <div class="flex items-center gap-2 mb-6 border-b border-blue-200 pb-2">
+            <section id="sec-login" class="block max-w-md mx-auto py-2 sm:py-6">
+                <div class="flex items-center gap-2.5 mb-5 border-b border-blue-200/80 pb-3">
                     <span class="text-2xl">🔐</span>
-                    <h2 class="text-xl md:text-2xl font-bold text-[#0056b3]">Acceso Docentes y Coordinación</h2>
+                    <h2 class="text-xl sm:text-2xl font-bold text-[#0056b3]">Acceso a Calificaciones</h2>
                 </div>
-                <p class="text-sm text-gray-600 mb-6">Ingrese con su correo institucional y contraseña autorizada para calificar o consultar informes.</p>
-                <form id="form-login" class="space-y-4 md:space-y-5">
+                <p class="text-xs sm:text-sm text-gray-600 mb-6 leading-relaxed">
+                    Ingrese con su correo institucional y contraseña autorizada para calificar residentes o consultar informes.
+                </p>
+                <form id="form-login" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1">Correo Electrónico:</label>
-                        <input type="email" id="login-email" placeholder="docente@hgm.gov.co" required class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                        <label for="login-email" class="block text-xs sm:text-sm font-bold text-gray-700 mb-1">Correo Electrónico:</label>
+                        <input type="email" 
+                            id="login-email" 
+                            placeholder="ejemplo@hgm.gov.co" 
+                            autocomplete="username"
+                            autocapitalize="none"
+                            autocorrect="off"
+                            spellcheck="false"
+                            required 
+                            class="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm sm:text-base">
                     </div>
                     <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1">Contraseña:</label>
-                        <input type="password" id="login-password" required class="w-full border border-gray-300 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                        <label for="login-password" class="block text-xs sm:text-sm font-bold text-gray-700 mb-1">Contraseña:</label>
+                        <input type="password" 
+                            id="login-password" 
+                            placeholder="••••••••" 
+                            autocomplete="current-password"
+                            required 
+                            class="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm sm:text-base">
                     </div>
-                    <button type="submit" class="w-full bg-[#28a745] hover:bg-green-700 text-white font-bold py-3 px-4 rounded transition shadow-sm">Iniciar Sesión</button>
-                    <div class="text-center mt-4">
-                        <a href="#" id="btn-forgot-password" class="text-sm text-blue-600 hover:underline font-medium">¿Primera vez o olvidaste tu contraseña? Haz clic aquí.</a>
+                    <button type="submit" id="btn-submit-login" class="w-full bg-[#28a745] hover:bg-green-700 active:scale-98 text-white font-bold py-3 px-4 rounded-xl transition duration-150 shadow-md text-sm sm:text-base flex items-center justify-center gap-2">
+                        <span>Ingresar</span> <span>&rarr;</span>
+                    </button>
+                    <div class="text-center pt-2">
+                        <a href="#" id="btn-forgot-password" class="text-xs sm:text-sm text-blue-600 hover:text-blue-800 hover:underline font-medium inline-block py-1">
+                            ¿Olvidaste tu contraseña? Restablécela aquí.
+                        </a>
                     </div>
                 </form>
             </section>
 
             <!-- DASHBOARD -->
-            <section id="sec-dashboard" class="hidden space-y-8">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-blue-200 pb-4">
-                    <h2 class="text-xl sm:text-2xl font-bold text-[#0056b3]">Panel de Evaluación</h2>
-                    <div class="flex flex-wrap gap-2">
-                        <button id="btn-admin-usuarios" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 sm:px-4 rounded transition shadow text-xs sm:text-sm">
-                            👨‍⚕️ Gestionar Docentes
+            <section id="sec-dashboard" class="hidden space-y-6 sm:space-y-8">
+                <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 border-b border-blue-200/80 pb-4">
+                    <h2 class="text-lg sm:text-2xl font-bold text-[#0056b3] flex items-center gap-2">
+                        <span>📋</span> Panel de Evaluación
+                    </h2>
+                    <div class="grid grid-cols-1 sm:flex sm:flex-wrap gap-2 w-full sm:w-auto">
+                        <button id="btn-admin-usuarios" class="hidden bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold py-2.5 px-3.5 rounded-xl transition shadow-sm text-xs sm:text-sm flex items-center justify-center gap-1.5">
+                            <span>👨‍⚕️</span> Gestionar Docentes
                         </button>
-                        <button id="btn-admin-estudiantes" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 sm:px-4 rounded transition shadow text-xs sm:text-sm">
-                            👥 Gestionar Residentes
+                        <button id="btn-admin-estudiantes" class="hidden bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2.5 px-3.5 rounded-xl transition shadow-sm text-xs sm:text-sm flex items-center justify-center gap-1.5">
+                            <span>👥</span> Gestionar Residentes
                         </button>
-                        <button id="btn-informes" class="hidden bg-[#0056b3] hover:bg-blue-800 text-white font-bold py-2 px-3 sm:px-4 rounded transition shadow text-xs sm:text-sm">
-                            📊 Generar Informe Final
+                        <button id="btn-informes" class="hidden bg-[#0056b3] hover:bg-blue-800 active:scale-95 text-white font-bold py-2.5 px-3.5 rounded-xl transition shadow-sm text-xs sm:text-sm flex items-center justify-center gap-1.5">
+                            <span>📊</span> Generar Informe Final
                         </button>
                     </div>
                 </div>
                 
+                <!-- Paso 1: Programa -->
                 <div>
-                    <h3 class="text-sm font-bold text-gray-700 mb-2">1. Seleccione el Programa:</h3>
-                    <div class="flex gap-4">
-                        <button class="btn-programa flex-1 bg-white hover:bg-blue-50 border border-gray-300 py-3 rounded font-bold text-gray-700 transition shadow-sm" data-prog="residente">Residente de Pediatría</button>
-                        <button class="btn-programa flex-1 bg-white hover:bg-blue-50 border border-gray-300 py-3 rounded font-bold text-gray-700 transition shadow-sm" data-prog="fellow">Fellow de Cuidado Intensivo</button>
+                    <h3 class="text-xs sm:text-sm font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <span class="bg-blue-100 text-[#0056b3] rounded-full w-5 h-5 inline-flex items-center justify-center text-xs">1</span> 
+                        Seleccione el Programa:
+                    </h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4">
+                        <button class="btn-programa bg-white hover:bg-blue-50 border-2 border-gray-200 py-3.5 px-4 rounded-xl font-bold text-gray-700 transition duration-150 shadow-sm text-sm sm:text-base flex items-center justify-center gap-2" data-prog="residente">
+                            <span>👶</span> Residente de Pediatría
+                        </button>
+                        <button class="btn-programa bg-white hover:bg-blue-50 border-2 border-gray-200 py-3.5 px-4 rounded-xl font-bold text-gray-700 transition duration-150 shadow-sm text-sm sm:text-base flex items-center justify-center gap-2" data-prog="fellow">
+                            <span>🩺</span> Fellow de Cuidado Intensivo
+                        </button>
                     </div>
                 </div>
 
+                <!-- Paso 2: Estudiante -->
                 <div id="estudiantes-container" class="hidden">
-                    <h3 class="text-sm font-bold text-gray-700 mb-2">2. Seleccione el Estudiante:</h3>
-                    <select id="select-estudiante" class="w-full border border-gray-300 rounded px-3 py-3 bg-white focus:ring-2 focus:ring-blue-500 outline-none font-medium">
-                        <option value="">Seleccione estudiante...</option>
-                    </select>
+                    <h3 class="text-xs sm:text-sm font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <span class="bg-blue-100 text-[#0056b3] rounded-full w-5 h-5 inline-flex items-center justify-center text-xs">2</span>
+                        Seleccione el Estudiante:
+                    </h3>
+                    <div class="relative">
+                        <select id="select-estudiante" class="w-full border-2 border-gray-200 rounded-xl px-4 py-3 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-medium text-sm sm:text-base transition shadow-sm appearance-none">
+                            <option value="">Seleccione estudiante...</option>
+                        </select>
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-gray-500">
+                            ▼
+                        </div>
+                    </div>
                 </div>
 
+                <!-- Paso 3: Rúbrica -->
                 <div id="rubricas-container" class="hidden">
-                    <h3 class="text-sm font-bold text-gray-700 mb-2">3. Seleccione la Evaluación a Realizar:</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-4 rounded border border-[#0056b3] font-bold transition shadow-sm" data-rubrica="ronda">Ronda</button>
-                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-4 rounded border border-[#0056b3] font-bold transition shadow-sm" data-rubrica="seminarios">Seminarios</button>
-                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-4 rounded border border-[#0056b3] font-bold transition shadow-sm" data-rubrica="tema_central">Tema Central</button>
+                    <h3 class="text-xs sm:text-sm font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                        <span class="bg-blue-100 text-[#0056b3] rounded-full w-5 h-5 inline-flex items-center justify-center text-xs">3</span>
+                        Seleccione la Evaluación a Realizar:
+                    </h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-4">
+                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-3.5 px-3 rounded-xl border-2 border-[#0056b3] font-bold transition duration-150 shadow-sm text-sm sm:text-base flex items-center justify-center gap-2" data-rubrica="ronda">
+                            <span>🩺</span> Ronda Clínica
+                        </button>
+                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-3.5 px-3 rounded-xl border-2 border-[#0056b3] font-bold transition duration-150 shadow-sm text-sm sm:text-base flex items-center justify-center gap-2" data-rubrica="seminarios">
+                            <span>📚</span> Seminarios
+                        </button>
+                        <button class="btn-rubrica bg-white hover:bg-[#0056b3] hover:text-white text-[#0056b3] py-3.5 px-3 rounded-xl border-2 border-[#0056b3] font-bold transition duration-150 shadow-sm text-sm sm:text-base flex items-center justify-center gap-2" data-rubrica="tema_central">
+                            <span>🎯</span> Tema Central
+                        </button>
                     </div>
                 </div>
             </section>
 
             <!-- FORMULARIO RÚBRICA -->
-            <section id="sec-formulario" class="hidden">
-                <div class="flex justify-between items-center mb-6">
-                    <button id="btn-volver-dash" class="text-[#0056b3] hover:underline font-bold text-sm">&larr; Volver</button>
-                    <button id="btn-ver-rubrica" class="bg-white border border-[#0056b3] text-[#0056b3] hover:bg-blue-50 font-bold py-1.5 px-4 rounded text-sm flex items-center gap-2 shadow-sm transition">
+            <section id="sec-formulario" class="hidden space-y-5">
+                <div class="flex flex-wrap justify-between items-center gap-2 mb-4 border-b pb-3">
+                    <button id="btn-volver-dash" class="text-[#0056b3] hover:underline font-bold text-sm flex items-center gap-1 py-1">
+                        <span>&larr;</span> Volver al Panel
+                    </button>
+                    <button id="btn-ver-rubrica" class="bg-white border-2 border-[#0056b3] text-[#0056b3] hover:bg-blue-50 font-bold py-1.5 px-3.5 rounded-xl text-xs sm:text-sm flex items-center gap-1.5 shadow-sm transition">
                         <span>📄</span> Ver Rúbrica Completa
                     </button>
                 </div>
                 
-                <h2 id="form-title" class="text-2xl font-bold text-[#0056b3] border-b border-[#0056b3] pb-3 mb-6"></h2>
+                <h2 id="form-title" class="text-xl sm:text-2xl font-bold text-[#0056b3] leading-snug"></h2>
                 
-                <div class="mb-6 flex items-center gap-2">
-                    <label class="font-bold text-gray-700 text-sm">Residente a evaluar:</label>
-                    <span id="form-estudiante-nombre" class="font-medium bg-white px-3 py-1 border rounded text-gray-800"></span>
+                <div class="bg-blue-50/70 border border-blue-200 rounded-xl p-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                    <label class="font-bold text-gray-700">Residente a evaluar:</label>
+                    <span id="form-estudiante-nombre" class="font-bold text-[#0056b3] bg-white px-3 py-1 border rounded-lg shadow-2xs"></span>
                 </div>
 
                 <form id="form-evaluacion" class="space-y-6">
-                    <div id="campo-seminario" class="hidden bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
-                        <label class="block font-bold text-gray-800 mb-2">Nombre del Seminario / Tema <span class="text-red-500">*</span></label>
-                        <input type="text" id="nombre-seminario" class="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-blue-500 bg-gray-50">
+                    <div id="campo-seminario" class="hidden bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                        <label for="nombre-seminario" class="block font-bold text-gray-800 mb-1.5 text-xs sm:text-sm">Nombre del Seminario / Tema <span class="text-red-500">*</span></label>
+                        <input type="text" id="nombre-seminario" class="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 outline-none focus:border-blue-500 bg-gray-50/80 focus:bg-white text-sm sm:text-base transition">
                     </div>
 
-                    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4 text-sm text-gray-700 shadow-sm flex gap-2 items-center">
-                        <span class="text-xl">ℹ️</span>
-                        <p>Seleccione el nivel de desempeño. Use <strong>"No aplica"</strong> si el ítem no fue observable.</p>
+                    <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 sm:p-4 text-xs sm:text-sm text-amber-900 shadow-2xs flex gap-2.5 items-center">
+                        <span class="text-lg flex-shrink-0">ℹ️</span>
+                        <p>Seleccione el nivel de desempeño para cada ítem. Puede ajustar notas específicas si aplica o seleccionar <strong>"No aplica"</strong>.</p>
                     </div>
 
-                    <div id="items-rubrica" class="space-y-6"></div>
+                    <!-- Contenedor dinámico de tarjetas de ítems -->
+                    <div id="items-rubrica" class="space-y-5"></div>
 
                     <!-- Retroalimentación General -->
-                    <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm space-y-4 mt-6">
-                        <h3 class="font-bold text-gray-800 text-base border-b pb-2 flex items-center gap-2">
+                    <div class="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm space-y-4">
+                        <h3 class="font-bold text-gray-800 text-sm sm:text-base border-b pb-2 flex items-center gap-2">
                             <span>📝</span> Apreciaciones Generales de la Evaluación
                         </h3>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs font-bold text-green-700 mb-1">Aspectos Positivos Generales <span class="text-red-500">*</span></label>
-                                <textarea id="aspectos-positivos-generales" name="aspectosPositivosGenerales" required rows="3" class="w-full border border-green-300 rounded px-3 py-2 bg-green-50 focus:outline-none focus:border-green-500 text-sm" placeholder="Describa las principales fortalezas demostradas durante la evaluación..."></textarea>
+                                <label for="aspectos-positivos-generales" class="block text-xs font-bold text-green-700 mb-1">Aspectos Positivos Generales <span class="text-red-500">*</span></label>
+                                <textarea id="aspectos-positivos-generales" name="aspectosPositivosGenerales" required rows="3" class="w-full border border-green-300 rounded-lg px-3 py-2 bg-green-50/50 focus:bg-white focus:outline-none focus:border-green-500 text-xs sm:text-sm transition leading-relaxed" placeholder="Describa las principales fortalezas demostradas durante la evaluación..."></textarea>
                             </div>
                             <div>
-                                <label class="block text-xs font-bold text-orange-700 mb-1">Aspectos a Mejorar Generales <span class="text-red-500">*</span></label>
-                                <textarea id="aspectos-mejorar-generales" name="aspectosMejorarGenerales" required rows="3" class="w-full border border-orange-300 rounded px-3 py-2 bg-orange-50 focus:outline-none focus:border-orange-500 text-sm" placeholder="Describa las oportunidades de mejora o recomendaciones específicas..."></textarea>
+                                <label for="aspectos-mejorar-generales" class="block text-xs font-bold text-orange-700 mb-1">Aspectos a Mejorar Generales <span class="text-red-500">*</span></label>
+                                <textarea id="aspectos-mejorar-generales" name="aspectosMejorarGenerales" required rows="3" class="w-full border border-orange-300 rounded-lg px-3 py-2 bg-orange-50/50 focus:bg-white focus:outline-none focus:border-orange-500 text-xs sm:text-sm transition leading-relaxed" placeholder="Describa las oportunidades de mejora o recomendaciones específicas..."></textarea>
                             </div>
                         </div>
                     </div>
 
-                    <div class="pt-6 border-t border-gray-300 flex justify-end">
-                        <button type="submit" class="bg-[#0056b3] hover:bg-blue-800 text-white font-bold py-3 px-8 rounded shadow-lg transition">Guardar Evaluación</button>
+                    <div class="pt-4 border-t border-gray-200 flex justify-end">
+                        <button type="submit" class="w-full sm:w-auto bg-[#0056b3] hover:bg-blue-800 active:scale-95 text-white font-bold py-3 px-8 rounded-xl shadow-lg transition duration-150 text-sm sm:text-base flex items-center justify-center gap-2">
+                            <span>💾</span> Guardar Evaluación
+                        </button>
                     </div>
                 </form>
             </section>
 
             <!-- INFORMES -->
-            <section id="sec-informes" class="hidden">
-                <button id="btn-volver-dash-inf" class="text-[#0056b3] hover:underline font-bold text-sm mb-4">&larr; Volver</button>
+            <section id="sec-informes" class="hidden space-y-5">
+                <button id="btn-volver-dash-inf" class="text-[#0056b3] hover:underline font-bold text-sm flex items-center gap-1 mb-2">
+                    <span>&larr;</span> Volver al Panel
+                </button>
                 
-                <div class="flex items-center gap-2 mb-4 border-b border-blue-200 pb-2">
+                <div class="flex items-center gap-2.5 border-b border-blue-200/80 pb-3">
                     <span class="text-2xl">📊</span>
-                    <h2 class="text-2xl font-bold text-[#0056b3]">Informe Final Consolidado de Rotación</h2>
+                    <h2 class="text-xl sm:text-2xl font-bold text-[#0056b3]">Informe Final Consolidado de Rotación</h2>
                 </div>
                 
-                <p class="text-sm text-gray-600 mb-6">Genera un informe con el resumen de notas ponderadas: Ronda (40%), Seminarios (35%), Tema Central (20%) y Autoevaluación (5%), además de la descarga automática en formato Word (.docx).</p>
+                <p class="text-xs sm:text-sm text-gray-600 leading-relaxed">
+                    Genera el balance ponderado de rotación: Ronda (40%), Seminarios (35%), Tema Central (20%) y Autoevaluación (5%), con redacción ejecutiva por IA y descarga en Microsoft Word (.docx).
+                </p>
                 
-                <div class="bg-white border border-blue-100 p-5 rounded-lg mb-6 shadow-sm">
-                    <label class="block font-bold text-[#0056b3] mb-2 flex items-center gap-1"><span>🔑</span> Clave API de Gemini (IA):</label>
-                    <input type="password" id="inf-api-key" placeholder="Pega aquí tu API Key de Gemini..." class="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:border-blue-500 bg-gray-50">
-                    <p class="text-xs text-gray-500 mt-1">Tu clave se guarda de forma segura únicamente en este dispositivo.</p>
+                <div class="bg-blue-50/60 border border-blue-200 p-4 rounded-xl shadow-2xs space-y-1.5">
+                    <label for="inf-api-key" class="block font-bold text-[#0056b3] text-xs sm:text-sm flex items-center gap-1.5">
+                        <span>🔑</span> Clave API de Gemini (Google AI Studio):
+                    </label>
+                    <input type="password" id="inf-api-key" placeholder="Pega aquí tu API Key de Gemini..." class="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 outline-none focus:border-blue-500 bg-white text-xs sm:text-sm transition">
+                    <p class="text-[11px] text-gray-500">Tu clave se guarda de forma segura únicamente en este navegador.</p>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 bg-white p-5 rounded-lg border border-gray-200 shadow-sm">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm">
                     <div>
-                        <label class="block font-bold text-gray-700 mb-1 text-sm">Residente/Fellow:</label>
-                        <select id="inf-select-estudiante" class="w-full border border-gray-300 rounded p-2 outline-none focus:border-blue-500 bg-gray-50"></select>
+                        <label for="inf-select-estudiante" class="block font-bold text-gray-700 mb-1 text-xs sm:text-sm">Residente / Fellow:</label>
+                        <select id="inf-select-estudiante" class="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-gray-50/80 focus:bg-white text-xs sm:text-sm"></select>
                     </div>
                     <div>
-                        <label class="block font-bold text-gray-700 mb-1 text-sm">Rotación:</label>
-                        <select id="inf-rotacion" class="w-full border border-gray-300 rounded p-2 outline-none focus:border-blue-500 bg-gray-50">
+                        <label for="inf-rotacion" class="block font-bold text-gray-700 mb-1 text-xs sm:text-sm">Rotación:</label>
+                        <select id="inf-rotacion" class="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-gray-50/80 focus:bg-white text-xs sm:text-sm">
                             <option value="Cuidado Intensivo Pediátrico">Cuidado Intensivo Pediátrico</option>
                             <option value="Pediatría General">Pediatría General</option>
                             <option value="Urgencias Pediátricas">Urgencias Pediátricas</option>
@@ -210,55 +304,51 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block font-bold text-gray-700 mb-1 text-sm">Desde:</label>
-                        <input type="date" id="inf-fecha-desde" class="w-full border border-gray-300 rounded p-2 outline-none bg-gray-50">
+                        <label for="inf-fecha-desde" class="block font-bold text-gray-700 mb-1 text-xs sm:text-sm">Desde:</label>
+                        <input type="date" id="inf-fecha-desde" class="w-full border border-gray-300 rounded-lg p-2.5 outline-none bg-gray-50/80 focus:bg-white text-xs sm:text-sm">
                     </div>
                     <div>
-                        <label class="block font-bold text-gray-700 mb-1 text-sm">Hasta:</label>
-                        <input type="date" id="inf-fecha-hasta" class="w-full border border-gray-300 rounded p-2 outline-none bg-gray-50">
+                        <label for="inf-fecha-hasta" class="block font-bold text-gray-700 mb-1 text-xs sm:text-sm">Hasta:</label>
+                        <input type="date" id="inf-fecha-hasta" class="w-full border border-gray-300 rounded-lg p-2.5 outline-none bg-gray-50/80 focus:bg-white text-xs sm:text-sm">
                     </div>
                 </div>
 
-                <!-- Sección de Autoevaluación -->
-                <div class="bg-white border border-gray-200 p-5 rounded-lg mb-6 shadow-sm">
-                    <h3 class="font-bold text-gray-800 mb-3 border-b pb-2">Autoevaluación del Residente (5%)</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label class="block font-bold text-gray-700 mb-1 text-sm">Nota de Autoevaluación (0.0 - 5.0):</label>
-                            <input type="number" id="inf-nota-auto" step="0.1" min="0" max="5" class="w-full border border-gray-300 rounded p-2 outline-none focus:border-blue-500 bg-gray-50" placeholder="Ej: 4.5" required>
-                        </div>
+                <!-- Autoevaluación -->
+                <div class="bg-white border border-gray-200 p-4 sm:p-5 rounded-xl shadow-sm">
+                    <h3 class="font-bold text-gray-800 mb-2 border-b pb-2 text-sm sm:text-base">Autoevaluación del Residente (5%)</h3>
+                    <div class="max-w-xs">
+                        <label for="inf-nota-auto" class="block font-bold text-gray-700 mb-1 text-xs sm:text-sm">Nota de Autoevaluación (0.0 - 5.0):</label>
+                        <input type="number" id="inf-nota-auto" step="0.1" min="0" max="5" class="w-full border border-gray-300 rounded-lg p-2.5 outline-none focus:border-blue-500 bg-gray-50/80 focus:bg-white text-sm" placeholder="Ej: 4.5" required>
                     </div>
                 </div>
 
-                <button id="btn-generar-ia" class="w-full bg-[#0056b3] hover:bg-blue-800 text-white font-bold py-3 px-4 rounded transition flex items-center justify-center gap-2 shadow-lg">
+                <button id="btn-generar-ia" class="w-full bg-[#0056b3] hover:bg-blue-800 active:scale-98 text-white font-bold py-3.5 px-4 rounded-xl transition flex items-center justify-center gap-2 shadow-lg text-sm sm:text-base">
                     <span>🔍</span> Generar Informe y Calcular Notas
                 </button>
 
-                <div id="inf-resultado" class="mt-8 hidden">
-                    <div class="flex justify-between items-center mb-4 border-b border-blue-200 pb-2">
-                        <h3 class="font-bold text-lg text-[#0056b3]">Resultado del Informe Consolidado:</h3>
-                        <button id="btn-descargar-word" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-4 rounded transition flex items-center gap-2 shadow-sm text-sm">
-                            <span>📄</span> Descargar Word
+                <div id="inf-resultado" class="mt-6 hidden">
+                    <div class="flex flex-wrap justify-between items-center gap-2 mb-4 border-b border-blue-200 pb-2">
+                        <h3 class="font-bold text-base sm:text-lg text-[#0056b3]">Resultado del Informe Consolidado:</h3>
+                        <button id="btn-descargar-word" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl transition flex items-center gap-2 shadow-sm text-xs sm:text-sm">
+                            <span>📄</span> Descargar Word (.docx)
                         </button>
                     </div>
-                    <!-- Contenedor que muestra la vista previa institucional -->
-                    <div id="informe-pdf-container" class="bg-white p-8 rounded-lg border border-gray-200 shadow-sm">
-                        <!-- Cabecera Institucional -->
+                    <div id="informe-pdf-container" class="bg-white p-4 sm:p-8 rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
                         <div class="text-center border-b pb-4 mb-6">
                             <img src="assets/logo.jpg" alt="Logo Hospital General de Medellín" class="h-16 mx-auto mb-2 object-contain">
-                            <h2 class="text-2xl font-bold text-gray-800">Evaluación Final de Rotación</h2>
-                            <h3 class="text-lg text-gray-600">Hospital General de Medellín - Luz Castro de Gutiérrez</h3>
+                            <h2 class="text-xl sm:text-2xl font-bold text-gray-800">Evaluación Final de Rotación</h2>
+                            <h3 class="text-sm sm:text-base text-gray-600">Hospital General de Medellín - Luz Castro de Gutiérrez</h3>
                         </div>
-                        <!-- Contenido generado -->
-                        <div id="inf-texto" class="whitespace-pre-wrap text-gray-800 leading-relaxed text-sm"></div>
+                        <div id="inf-texto" class="whitespace-pre-wrap text-gray-800 leading-relaxed text-xs sm:text-sm"></div>
                     </div>
                 </div>
             </section>
 
         </main>
     </div>
-    <!-- Dependencias de Exportación y Lógica Modular -->
+
+    <!-- Scripts de Terceros y Módulos -->
     <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
-    <script type="module" src="js/app.js?v=2"></script>
+    <script type="module" src="js/app.js?v=5"></script>
 </body>
 </html>

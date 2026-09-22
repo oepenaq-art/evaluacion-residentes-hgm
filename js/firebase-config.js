@@ -5,7 +5,10 @@ import {
     signOut, 
     onAuthStateChanged, 
     sendPasswordResetEmail,
-    createUserWithEmailAndPassword 
+    createUserWithEmailAndPassword,
+    setPersistence,
+    browserLocalPersistence,
+    browserSessionPersistence
 } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
 import { 
     getFirestore, 
@@ -47,9 +50,17 @@ let db = null;
 try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
+    // Configurar persistencia local resiliente para navegadores móviles y escritorio
+    if (auth) {
+        setPersistence(auth, browserLocalPersistence).catch(() => {
+            setPersistence(auth, browserSessionPersistence).catch(e => {
+                console.warn("Aviso de persistencia de sesión:", e);
+            });
+        });
+    }
     db = getFirestore(app);
 } catch (error) {
-    console.warn("Aviso Firebase:", error);
+    console.warn("Aviso inicialización Firebase:", error);
 }
 
 export {

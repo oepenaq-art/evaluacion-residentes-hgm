@@ -1,4 +1,4 @@
-import { rubricasData } from './rubricas-data.js';
+import { rubricasData } from './rubricas-data.js?v=5';
 import { 
     auth, 
     db, 
@@ -16,11 +16,11 @@ import {
     getDocs, 
     addDoc, 
     deleteDoc,
-    doc,
+    doc, 
     query, 
     where, 
     serverTimestamp 
-} from './firebase-config.js';
+} from './firebase-config.js?v=5';
 
 // --- ELEMENTOS DEL DOM ---
 const sections = {
@@ -78,11 +78,15 @@ let appState = {
     usuarios: []
 };
 
-// --- NAVEGACIÓN ---
+// --- NAVEGACIÓN SUAVE ---
 function showSection(sectionId) {
-    Object.values(sections).forEach(sec => sec.classList.add('hidden'));
-    sections[sectionId].classList.remove('hidden');
-    window.scrollTo(0, 0);
+    Object.values(sections).forEach(sec => {
+        if (sec) sec.classList.add('hidden');
+    });
+    if (sections[sectionId]) {
+        sections[sectionId].classList.remove('hidden');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // Advertencia amigable si falta configurar Firebase
@@ -95,22 +99,41 @@ if (auth) {
     onAuthStateChanged(auth, async (user) => {
         if (user) {
             let userRol = 'docente';
+            const emailNormalizado = (user.email || '').toLowerCase().trim();
+
+            // Respaldo de seguridad inmediato para el usuario coordinador principal
+            if (emailNormalizado.includes('oepenaq') || emailNormalizado.includes('coord') || emailNormalizado.includes('admin')) {
+                userRol = 'coordinador';
+            }
+
+            // Verificación profunda en Firestore
             try {
                 const usuariosRef = collection(db, 'usuarios');
-                const q = query(usuariosRef, where('correo', '==', user.email.toLowerCase().trim()));
+                const q = query(usuariosRef, where('correo', '==', emailNormalizado));
                 const querySnapshot = await getDocs(q);
+                
                 if (!querySnapshot.empty) {
                     const userData = querySnapshot.docs[0].data();
                     const r = (userData.rol || userData.Rol || '').toLowerCase().trim();
                     if (r === 'coordinador' || r === 'administrador') {
                         userRol = 'coordinador';
                     }
+                } else {
+                    // Verificación secundaria por si el documento tiene espacios o fue creado con otra clave
+                    const allSnap = await getDocs(usuariosRef);
+                    allSnap.forEach(d => {
+                        const data = d.data();
+                        const c = (data.correo || data.email || '').toLowerCase().trim();
+                        if (c === emailNormalizado) {
+                            const r = (data.rol || data.Rol || '').toLowerCase().trim();
+                            if (r === 'coordinador' || r === 'administrador') {
+                                userRol = 'coordinador';
+                            }
+                        }
+                    });
                 }
             } catch (error) {
-                console.error('Error al verificar rol de usuario en HGM:', error);
-                if (user.email.toLowerCase().includes('coord') || user.email.toLowerCase().includes('admin')) {
-                    userRol = 'coordinador';
-                }
+                console.warn('Aviso al verificar rol:', error);
             }
 
             appState.user = {
@@ -122,19 +145,28 @@ if (auth) {
             userEmailSpan.textContent = user.email;
             userInfo.classList.remove('hidden');
             
-            // Mostrar botones de administración si es coordinador
+            // Mostrar botones de administración para coordinadores
             if (appState.user.rol === 'coordinador') {
-                btnInformes.classList.remove('hidden');
+                if (btnInformes) btnInformes.classList.remove('hidden');
                 if (btnAdminEstudiantes) btnAdminEstudiantes.classList.remove('hidden');
                 if (btnAdminUsuarios) btnAdminUsuarios.classList.remove('hidden');
             } else {
-                btnInformes.classList.add('hidden');
+                if (btnInformes) btnInformes.classList.add('hidden');
                 if (btnAdminEstudiantes) btnAdminEstudiantes.classList.add('hidden');
                 if (btnAdminUsuarios) btnAdminUsuarios.classList.add('hidden');
             }
 
-            await cargarEstudiantesDesdeFirestore();
+            // Transición inmediata a la vista del panel sin bloquear la UI
             showSection('dashboard');
+            if (Swal.isVisible()) Swal.close();
+
+            // Cargar estudiantes en segundo plano
+            cargarEstudiantesDesdeFirestore().then(() => {
+                if (appState.programaSeleccionado) {
+                    filtrarEstudiantesEnSelect(appState.programaSeleccionado);
+                }
+            }).catch(e => console.warn('Carga diferida de estudiantes:', e));
+
         } else {
             appState.user = null;
             userInfo.classList.add('hidden');
@@ -145,7 +177,7 @@ if (auth) {
     showSection('login');
 }
 
-// --- LÓGICA DE LOGIN CON FIREBASE ---
+// --- LÓGICA DE LOGIN ---
 formLogin.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -153,48 +185,41 @@ formLogin.addEventListener('submit', async (e) => {
         Swal.fire({
             icon: 'info',
             title: 'Configura tu Proyecto de Firebase',
-            html: `
-                <p class="text-sm text-left mb-3">Para conectar la base de datos del Hospital General de Medellín, ingresa a <code>js/firebase-config.js</code> y pega tus credenciales de Firebase.</p>
-                <p class="text-xs text-gray-500 text-left">Revisa la guía en el archivo <code>README.md</code> para ver los pasos detallados.</p>
-            `,
+            text: 'Revisa las credenciales en js/firebase-config.js',
             confirmButtonColor: '#0056b3'
         });
         return;
     }
 
-    const email = loginEmail.value.trim();
+    const email = loginEmail.value.toLowerCase().trim();
     const password = loginPassword.value;
     
     Swal.fire({
-        title: 'Verificando credenciales...',
+        title: 'Iniciando sesión...',
+        text: 'Verificando credenciales institucionales',
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading()
     });
 
     try {
         await signInWithEmailAndPassword(auth, email, password);
-        Swal.fire({
-            icon: 'success',
-            title: '¡Bienvenido(a)!',
-            text: 'Hospital General de Medellín',
-            toast: true,
-            position: 'top-end',
-            showConfirmButton: false,
-            timer: 2500
-        });
+        // onAuthStateChanged se encarga de cambiar la pantalla inmediatamente
     } catch (error) {
+        Swal.close();
         console.error('Error de autenticación:', error);
         let mensajeError = `Error (${error.code || 'desconocido'}): Correo o contraseña incorrectos.`;
         if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
-            mensajeError = 'Usuario no encontrado o clave inválida. Revisa que el correo y contraseña coincidan con los creados en Firebase Authentication.';
+            mensajeError = 'Usuario no encontrado o contraseña incorrecta. Verifique que el correo y contraseña coincidan con los registrados.';
         } else if (error.code === 'auth/wrong-password') {
             mensajeError = 'Contraseña incorrecta.';
         } else if (error.code === 'auth/invalid-email') {
             mensajeError = 'El formato del correo es inválido.';
+        } else if (error.code === 'auth/network-request-failed') {
+            mensajeError = 'Error de conexión a internet. Verifique su red móvil o Wi-Fi institucional.';
+        } else if (error.code === 'auth/too-many-requests') {
+            mensajeError = 'Demasiados intentos fallidos. Intente de nuevo en unos minutos o use la opción de recuperar contraseña.';
         } else if (error.code === 'auth/unauthorized-domain') {
-            mensajeError = 'Dominio no autorizado. Debes agregar tu dominio o localhost en Firebase > Authentication > Settings > Authorized domains.';
-        } else if (error.code === 'auth/operation-not-allowed') {
-            mensajeError = 'El acceso por Correo/Contraseña no está activado en Firebase > Authentication > Sign-in method.';
+            mensajeError = 'Dominio no autorizado en Firebase. Añada oepenaq-art.github.io en Firebase Console > Authentication > Settings > Authorized domains.';
         }
         Swal.fire('Error de Acceso', mensajeError, 'error');
     }
@@ -205,16 +230,11 @@ if (btnForgotPassword) {
     btnForgotPassword.addEventListener('click', async (e) => {
         e.preventDefault();
 
-        if (!isFirebaseConfigured()) {
-            Swal.fire('Configuración requerida', 'Debes configurar las credenciales de Firebase en js/firebase-config.js para utilizar la recuperación de contraseñas.', 'info');
-            return;
-        }
-
         const { value: emailToReset } = await Swal.fire({
             title: 'Recuperar Contraseña',
             input: 'email',
             inputLabel: 'Ingresa tu correo institucional',
-            inputPlaceholder: 'docente@hgm.gov.co',
+            inputPlaceholder: 'ejemplo@hgm.gov.co',
             showCancelButton: true,
             confirmButtonText: 'Enviar Enlace',
             cancelButtonText: 'Cancelar',
@@ -222,12 +242,13 @@ if (btnForgotPassword) {
         });
 
         if (emailToReset) {
+            const emailClean = emailToReset.toLowerCase().trim();
             try {
-                await sendPasswordResetEmail(auth, emailToReset);
-                Swal.fire('¡Correo Enviado!', 'Revisa tu bandeja de entrada o la carpeta de spam para restablecer tu contraseña.', 'success');
+                await sendPasswordResetEmail(auth, emailClean);
+                Swal.fire('¡Correo Enviado!', 'Revisa tu bandeja de entrada o spam para restablecer tu contraseña.', 'success');
             } catch (error) {
                 console.error('Error al enviar recuperación:', error);
-                Swal.fire('Error', 'Hubo un problema. Verifica que el correo esté bien escrito y registrado en Firebase.', 'error');
+                Swal.fire('Error', 'No se pudo enviar el correo. Verifique que esté correctamente registrado.', 'error');
             }
         }
     });
@@ -242,8 +263,8 @@ btnLogout.addEventListener('click', async () => {
         estudiantesContainer.classList.add('hidden');
         rubricasContainer.classList.add('hidden');
         btnProgramas.forEach(b => {
-            b.classList.remove('bg-[#0056b3]', 'text-white');
-            b.classList.add('bg-white', 'text-gray-700');
+            b.classList.remove('bg-[#0056b3]', 'text-white', 'border-[#0056b3]', 'shadow-md');
+            b.classList.add('bg-white', 'text-gray-700', 'border-gray-200');
         });
         showSection('login');
     } catch (error) {
@@ -255,7 +276,6 @@ btnLogout.addEventListener('click', async () => {
 async function cargarEstudiantesDesdeFirestore() {
     if (!db) return;
     try {
-        console.log('Consultando colección estudiantes en Firestore (HGM)...');
         const querySnapshot = await getDocs(collection(db, 'estudiantes'));
         appState.estudiantes = [];
         querySnapshot.forEach((docSnap) => {
@@ -277,21 +297,20 @@ async function cargarEstudiantesDesdeFirestore() {
                 ...data
             });
         });
-        console.log('Lista final de estudiantes cargada (HGM):', appState.estudiantes);
     } catch (error) {
-        console.error('Error al cargar estudiantes de Firestore:', error);
+        console.warn('Aviso estudiantes Firestore:', error);
     }
 }
 
-// --- LÓGICA DEL DASHBOARD ---
+// --- DASHBOARD: SELECCIÓN DE PROGRAMA ---
 btnProgramas.forEach(btn => {
     btn.addEventListener('click', async () => {
         btnProgramas.forEach(b => {
-            b.classList.remove('bg-[#0056b3]', 'text-white');
-            b.classList.add('bg-white', 'text-gray-700');
+            b.classList.remove('bg-[#0056b3]', 'text-white', 'border-[#0056b3]', 'shadow-md');
+            b.classList.add('bg-white', 'text-gray-700', 'border-gray-200');
         });
-        btn.classList.remove('bg-white', 'text-gray-700');
-        btn.classList.add('bg-[#0056b3]', 'text-white');
+        btn.classList.remove('bg-white', 'text-gray-700', 'border-gray-200');
+        btn.classList.add('bg-[#0056b3]', 'text-white', 'border-[#0056b3]', 'shadow-md');
         
         appState.programaSeleccionado = btn.dataset.prog;
 
@@ -310,6 +329,11 @@ function filtrarEstudiantesEnSelect(programa) {
     selectEstudiante.innerHTML = '<option value="">Seleccione estudiante...</option>';
     const filtrados = appState.estudiantes.filter(e => e.programa === programa);
     
+    if (filtrados.length === 0) {
+        selectEstudiante.innerHTML = '<option value="">No hay residentes inscritos en este programa aún</option>';
+        return;
+    }
+
     filtrados.forEach(est => {
         const option = document.createElement('option');
         option.value = est.id;
@@ -341,35 +365,18 @@ btnVolverDash.addEventListener('click', () => showSection('dashboard'));
 
 function getNombreNivel(val, esRonda) {
     if (esRonda) {
-        if (val === 4) return 'Sobresaliente (4.1 - 5.0)';
-        if (val === 3) return 'Aprobado / Bueno (3.0 - 4.0)';
-        if (val === 2) return 'Por Mejorar / Regular (1.0 - 2.9)';
-        if (val === 1) return 'Insuficiente (0)';
-        return 'No Aplica';
+        if (val === 4) return '<span class="font-bold text-xs sm:text-sm text-emerald-800">Sobresaliente</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(4.1 - 5.0)</span>';
+        if (val === 3) return '<span class="font-bold text-xs sm:text-sm text-sky-800">Aprobado</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(3.0 - 4.0)</span>';
+        if (val === 2) return '<span class="font-bold text-xs sm:text-sm text-amber-800">Por Mejorar</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(1.0 - 2.9)</span>';
+        if (val === 1) return '<span class="font-bold text-xs sm:text-sm text-rose-800">Insuficiente</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(0)</span>';
+        return '<span class="font-bold text-xs sm:text-sm text-gray-600">No aplica</span>';
     } else {
-        if (val === 5) return 'Excelente (5.0)';
-        if (val === 4) return 'Sobresaliente (4.0)';
-        if (val === 3) return 'Aprobado / Bueno (3.0)';
-        if (val === 2) return 'Por Mejorar / Regular (2.0)';
-        if (val === 1) return 'Insuficiente (1.0)';
-        return 'No Aplica';
-    }
-}
-
-function getPrefijoGuia(val, esRonda) {
-    if (esRonda) {
-        if (val === 4) return '<span class="text-emerald-700 font-bold">Sobr. (4.1-5.0):</span>';
-        if (val === 3) return '<span class="text-sky-700 font-bold">Aprob. (3.0-4.0):</span>';
-        if (val === 2) return '<span class="text-amber-700 font-bold">Por mej. (1.0-2.9):</span>';
-        if (val === 1) return '<span class="text-rose-700 font-bold">Insuf. (0):</span>';
-        return '';
-    } else {
-        if (val === 5) return '<span class="text-green-800 font-bold">Excel. (5.0):</span>';
-        if (val === 4) return '<span class="text-emerald-700 font-bold">Sobr. (4.0):</span>';
-        if (val === 3) return '<span class="text-sky-700 font-bold">Aprob. (3.0):</span>';
-        if (val === 2) return '<span class="text-amber-700 font-bold">Por mej. (2.0):</span>';
-        if (val === 1) return '<span class="text-rose-700 font-bold">Insuf. (1.0):</span>';
-        return '';
+        if (val === 5) return '<span class="font-bold text-xs sm:text-sm text-green-800">Excelente</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(5.0)</span>';
+        if (val === 4) return '<span class="font-bold text-xs sm:text-sm text-emerald-800">Sobresaliente</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(4.0)</span>';
+        if (val === 3) return '<span class="font-bold text-xs sm:text-sm text-sky-800">Aprobado</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(3.0)</span>';
+        if (val === 2) return '<span class="font-bold text-xs sm:text-sm text-amber-800">Por Mejorar</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(2.0)</span>';
+        if (val === 1) return '<span class="font-bold text-xs sm:text-sm text-rose-800">Insuficiente</span><span class="text-[10px] sm:text-[11px] text-gray-500 font-medium">(1.0)</span>';
+        return '<span class="font-bold text-xs sm:text-sm text-gray-600">No aplica</span>';
     }
 }
 
@@ -385,11 +392,11 @@ btnVerRubrica.addEventListener('click', (e) => {
         headerHtml = `
             <thead class="text-white text-xs uppercase font-bold sticky top-0">
                 <tr>
-                    <th class="p-3 bg-[#0056b3] border border-blue-900 text-left min-w-[140px]">Ítem</th>
-                    <th class="p-3 bg-[#e53e3e] border border-red-800 text-center min-w-[130px]">Insuficiente 0</th>
-                    <th class="p-3 bg-[#dd6b20] border border-orange-800 text-center min-w-[130px]">Por Mejorar 1.0 - 2.9</th>
-                    <th class="p-3 bg-[#0284c7] border border-sky-800 text-center min-w-[130px]">Aprobado 3.0 - 4.0</th>
-                    <th class="p-3 bg-[#16a34a] border border-green-800 text-center min-w-[130px]">Sobresaliente 4.1 - 5.0</th>
+                    <th class="p-3 bg-[#0056b3] border border-blue-900 text-left min-w-[130px]">Ítem</th>
+                    <th class="p-3 bg-[#e53e3e] border border-red-800 text-center min-w-[110px]">Insuficiente 0</th>
+                    <th class="p-3 bg-[#dd6b20] border border-orange-800 text-center min-w-[120px]">Por Mejorar 1.0 - 2.9</th>
+                    <th class="p-3 bg-[#0284c7] border border-sky-800 text-center min-w-[120px]">Aprobado 3.0 - 4.0</th>
+                    <th class="p-3 bg-[#16a34a] border border-green-800 text-center min-w-[120px]">Sobresaliente 4.1 - 5.0</th>
                 </tr>
             </thead>
         `;
@@ -397,12 +404,12 @@ btnVerRubrica.addEventListener('click', (e) => {
         headerHtml = `
             <thead class="text-white text-xs uppercase font-bold sticky top-0">
                 <tr>
-                    <th class="p-3 bg-[#0056b3] border border-blue-900 text-left min-w-[140px]">Ítem</th>
-                    <th class="p-3 bg-[#e53e3e] border border-red-800 text-center min-w-[130px]">Insuficiente 1.0</th>
-                    <th class="p-3 bg-[#dd6b20] border border-orange-800 text-center min-w-[130px]">Por Mejorar 2.0</th>
-                    <th class="p-3 bg-[#0284c7] border border-sky-800 text-center min-w-[130px]">Aprobado 3.0</th>
-                    <th class="p-3 bg-[#16a34a] border border-green-800 text-center min-w-[130px]">Sobresaliente 4.0</th>
-                    ${tieneNivel5 ? '<th class="p-3 bg-[#15803d] border border-emerald-900 text-center min-w-[130px]">Excelente 5.0</th>' : ''}
+                    <th class="p-3 bg-[#0056b3] border border-blue-900 text-left min-w-[130px]">Ítem</th>
+                    <th class="p-3 bg-[#e53e3e] border border-red-800 text-center min-w-[100px]">Insuficiente 1.0</th>
+                    <th class="p-3 bg-[#dd6b20] border border-orange-800 text-center min-w-[100px]">Por Mejorar 2.0</th>
+                    <th class="p-3 bg-[#0284c7] border border-sky-800 text-center min-w-[100px]">Aprobado 3.0</th>
+                    <th class="p-3 bg-[#16a34a] border border-green-800 text-center min-w-[100px]">Sobresaliente 4.0</th>
+                    ${tieneNivel5 ? '<th class="p-3 bg-[#15803d] border border-emerald-900 text-center min-w-[100px]">Excelente 5.0</th>' : ''}
                 </tr>
             </thead>
         `;
@@ -431,7 +438,7 @@ btnVerRubrica.addEventListener('click', (e) => {
     }).join('');
 
     const tableModalHtml = `
-        <div class="overflow-x-auto text-left max-h-[72vh] rounded-lg border shadow-sm">
+        <div class="overflow-x-auto text-left max-h-[70vh] rounded-xl border shadow-2xs">
             <table class="w-full text-left border-collapse bg-white">
                 ${headerHtml}
                 <tbody class="divide-y divide-gray-200">
@@ -442,9 +449,9 @@ btnVerRubrica.addEventListener('click', (e) => {
     `;
 
     Swal.fire({
-        title: `Rúbrica de Evaluación Completa - ${dataRubrica.titulo}`,
+        title: `Rúbrica Completa - ${dataRubrica.titulo}`,
         html: tableModalHtml,
-        width: '95%',
+        width: window.innerWidth < 768 ? '96%' : '88%',
         confirmButtonText: 'Cerrar Rúbrica',
         confirmButtonColor: '#0056b3',
         showCloseButton: true
@@ -471,16 +478,16 @@ function renderizarFormulario() {
 
     dataRubrica.items.forEach(item => {
         const botonesNivelesHtml = item.opciones.slice().reverse().map(op => {
-            let colorClase = 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-gray-300';
-            if (op.valor === 5) colorClase = 'hover:bg-green-600 hover:text-white border-green-600 text-green-800 bg-green-50';
-            if (op.valor === 4) colorClase = 'hover:bg-emerald-500 hover:text-white border-emerald-500 text-emerald-800 bg-emerald-50';
-            if (op.valor === 3) colorClase = 'hover:bg-sky-500 hover:text-white border-sky-500 text-sky-800 bg-sky-50';
-            if (op.valor === 2) colorClase = 'hover:bg-amber-500 hover:text-white border-amber-500 text-amber-800 bg-amber-50';
-            if (op.valor === 1) colorClase = 'hover:bg-rose-500 hover:text-white border-rose-500 text-rose-800 bg-rose-50';
+            let colorClase = 'bg-white text-gray-700 hover:bg-gray-100 border-gray-300';
+            if (op.valor === 5) colorClase = 'hover:bg-green-600 hover:text-white border-green-500 text-green-900 bg-green-50/70';
+            if (op.valor === 4) colorClase = 'hover:bg-emerald-500 hover:text-white border-emerald-500 text-emerald-900 bg-emerald-50/70';
+            if (op.valor === 3) colorClase = 'hover:bg-sky-500 hover:text-white border-sky-500 text-sky-900 bg-sky-50/70';
+            if (op.valor === 2) colorClase = 'hover:bg-amber-500 hover:text-white border-amber-500 text-amber-900 bg-amber-50/70';
+            if (op.valor === 1) colorClase = 'hover:bg-rose-500 hover:text-white border-rose-500 text-rose-900 bg-rose-50/70';
 
             return `
                 <button type="button" 
-                    class="btn-nivel-opcion border font-semibold py-2 px-3 rounded-lg text-xs transition duration-150 shadow-sm ${colorClase}"
+                    class="btn-nivel-opcion border-2 py-2.5 px-2 rounded-xl transition duration-150 shadow-2xs flex flex-col items-center justify-center text-center min-h-[54px] ${colorClase}"
                     data-item="${item.id}"
                     data-valor="${op.valor}">
                     ${getNombreNivel(op.valor, esRonda)}
@@ -490,24 +497,36 @@ function renderizarFormulario() {
 
         const botonNoAplicaHtml = `
             <button type="button" 
-                class="btn-nivel-opcion border font-semibold py-2 px-3 rounded-lg text-xs transition duration-150 shadow-sm bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-600 hover:text-white"
+                class="btn-nivel-opcion border-2 py-2.5 px-2 rounded-xl transition duration-150 shadow-2xs bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-600 hover:text-white flex flex-col items-center justify-center text-center min-h-[54px]"
                 data-item="${item.id}"
                 data-valor="0">
-                No aplica
+                <span class="font-bold text-xs sm:text-sm">No aplica</span>
             </button>
         `;
 
-        const guiaTextoHtml = item.opciones.slice().reverse().map(op => {
-            const descripcionCorta = op.texto.replace(/^[A-ZÁÉÍÓÚ\s\(\)\d]+:\s*/i, '');
-            return `${getPrefijoGuia(op.valor, esRonda)} ${descripcionCorta}`;
-        }).join(' <span class="text-gray-300 font-bold mx-1.5">|</span> ');
+        const criteriosHtml = item.opciones.slice().reverse().map(op => {
+            const desc = op.texto.replace(/^[A-ZÁÉÍÓÚ\s\(\)\d]+:\s*/i, '');
+            let colorPill = 'bg-gray-100 text-gray-800';
+            if (op.valor === 5) colorPill = 'bg-green-100 text-green-800 font-bold';
+            if (op.valor === 4) colorPill = 'bg-emerald-100 text-emerald-800 font-bold';
+            if (op.valor === 3) colorPill = 'bg-sky-100 text-sky-800 font-bold';
+            if (op.valor === 2) colorPill = 'bg-amber-100 text-amber-800 font-bold';
+            if (op.valor === 1) colorPill = 'bg-rose-100 text-rose-800 font-bold';
+
+            return `
+                <div class="flex items-start gap-2">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${colorPill}">Nivel ${op.valor}</span>
+                    <span class="text-gray-700 leading-snug">${desc}</span>
+                </div>
+            `;
+        }).join('');
 
         let inputNotaHtml = '';
         if (esRonda) {
             inputNotaHtml = `
-                <div class="flex items-center gap-3 bg-gray-50 p-2.5 rounded-lg border border-gray-200 mb-3">
-                    <label for="input_nota_${item.id}" class="text-xs sm:text-sm font-bold text-gray-700">
-                        Nota (0.0 - 5.0):
+                <div class="flex flex-wrap items-center gap-2.5 sm:gap-3.5 bg-blue-50/60 p-3 rounded-xl border border-blue-200 mb-3">
+                    <label for="input_nota_${item.id}" class="text-xs sm:text-sm font-bold text-gray-800">
+                        Nota exacta (0.0 - 5.0):
                     </label>
                     <input type="number" 
                         id="input_nota_${item.id}" 
@@ -516,9 +535,9 @@ function renderizarFormulario() {
                         min="0" 
                         max="5" 
                         placeholder="0.0" 
-                        class="w-20 border-2 border-blue-500 rounded px-2 py-1 text-center font-bold text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none" 
+                        class="w-20 border-2 border-blue-500 rounded-lg px-2 py-1.5 text-center font-bold text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none" 
                         required>
-                    <span class="text-xs text-gray-500">(Puedes ajustar la nota exacta libremente)</span>
+                    <span class="text-xs text-gray-500">(Ajusta decimales según desempeño)</span>
                 </div>
             `;
         } else {
@@ -528,30 +547,37 @@ function renderizarFormulario() {
         }
 
         const itemCardHtml = `
-            <div class="border rounded-xl p-5 bg-white shadow-sm border-gray-200" id="card_item_${item.id}">
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
-                    <h4 class="text-base font-bold text-gray-800">${item.titulo}</h4>
-                    <span class="bg-blue-50 text-[#0056b3] text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
+            <div class="border-2 rounded-2xl p-4 sm:p-5 bg-white shadow-2xs border-gray-200/90 transition hover:border-blue-300" id="card_item_${item.id}">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1.5 mb-3.5">
+                    <h4 class="text-sm sm:text-base font-bold text-gray-800">${item.titulo}</h4>
+                    <span class="bg-blue-50 text-[#0056b3] text-xs font-bold px-2.5 py-0.5 rounded-full border border-blue-200 self-start sm:self-auto">
                         Peso: ${item.peso}
                     </span>
                 </div>
 
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap gap-2 mb-4">
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3">
                     ${botonesNivelesHtml}
                     ${botonNoAplicaHtml}
                 </div>
 
                 ${inputNotaHtml}
 
-                <div class="text-[11px] text-gray-600 bg-white p-3 rounded-lg border border-gray-100 leading-relaxed shadow-inner">
-                    <strong class="text-gray-800 font-bold">Guía de criterios:</strong> ${guiaTextoHtml}
-                </div>
+                <details class="text-xs text-gray-700 bg-gray-50/80 rounded-xl p-2.5 sm:p-3 border border-gray-200 group">
+                    <summary class="font-bold cursor-pointer text-[#0056b3] flex items-center justify-between select-none">
+                        <span class="flex items-center gap-1.5"><span>📖</span> Criterios y Guía de Evaluación</span>
+                        <span class="text-xs transition-transform group-open:rotate-180">▼</span>
+                    </summary>
+                    <div class="mt-2.5 space-y-1.5 border-t border-gray-200/80 pt-2 text-[11px] sm:text-xs">
+                        ${criteriosHtml}
+                    </div>
+                </details>
             </div>
         `;
 
         itemsRubrica.insertAdjacentHTML('beforeend', itemCardHtml);
     });
 
+    // Eventos de selección de nota en botones
     document.querySelectorAll('.btn-nivel-opcion').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -574,9 +600,9 @@ function renderizarFormulario() {
 
             const parentCard = document.getElementById(`card_item_${itemId}`);
             parentCard.querySelectorAll('.btn-nivel-opcion').forEach(b => {
-                b.classList.remove('ring-2', 'ring-offset-2', 'ring-blue-600', 'font-black', 'scale-105', 'bg-blue-600', 'text-white');
+                b.classList.remove('ring-3', 'ring-blue-600', 'font-black', 'scale-[1.02]');
             });
-            btn.classList.add('ring-2', 'ring-offset-2', 'ring-blue-600', 'font-black', 'scale-105');
+            btn.classList.add('ring-3', 'ring-blue-600', 'font-black', 'scale-[1.02]');
         });
     });
 }
@@ -627,6 +653,7 @@ formEvaluacion.addEventListener('submit', async (e) => {
 
     Swal.fire({
         title: 'Guardando evaluación...',
+        text: 'Enviando calificación a la base de datos',
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading()
     });
@@ -644,7 +671,7 @@ formEvaluacion.addEventListener('submit', async (e) => {
         });
     } catch (error) {
         console.error('Error al guardar en Firestore:', error);
-        Swal.fire('Guardado Local', `La evaluación se completó (Nota: ${notaCalculada}). Revisa la conexión con Firebase.`, 'info')
+        Swal.fire('Guardado Local', `La evaluación se calculó (Nota: ${notaCalculada}), pero hubo un problema de conexión con la base de datos.`, 'info')
         .then(() => {
             formEvaluacion.reset();
             showSection('dashboard');
@@ -687,7 +714,7 @@ btnGenerarIa.addEventListener('click', async () => {
 
     const est = appState.estudiantes.find(e => e.id === estId);
     
-    btnGenerarIa.innerHTML = '<span>⏳</span> Consultando evaluaciones y procesando con Gemini...';
+    btnGenerarIa.innerHTML = '<span>⏳</span> Procesando evaluaciones con Gemini IA...';
     btnGenerarIa.disabled = true;
 
     try {
@@ -782,7 +809,7 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
         );
 
         if (availableModels.length === 0) {
-            throw new Error('La llave es válida, pero no tiene modelos Gemini habilitados en este proyecto de Google Cloud / AI Studio.');
+            throw new Error('La llave es válida, pero no tiene modelos Gemini habilitados en este proyecto.');
         }
 
         availableModels.sort((a, b) => b.name.localeCompare(a.name));
@@ -840,71 +867,73 @@ ${resumenFeedbackCualitativo || 'No hay comentarios registrados.'}
         const periodoEval = `${fechaDesdeStr || 'Inicio'} a ${fechaHastaStr || 'Fin'}`;
 
         infTexto.innerHTML = `
-            <div style="font-family: 'Inter', Arial, sans-serif; color: #333; padding: 20px 30px; background: white; border-radius: 8px;">
-                <div style="text-align: center; margin-bottom: 20px; color: #16a34a; font-weight: bold; padding: 10px; background: #dcfce7; border-radius: 8px;">
-                    ✅ ¡Informe generado con éxito! Tu documento de Word se descargará automáticamente.
+            <div style="font-family: 'Inter', Arial, sans-serif; color: #333; padding: 15px 20px; background: white; border-radius: 8px;">
+                <div style="text-align: center; margin-bottom: 15px; color: #16a34a; font-weight: bold; padding: 10px; background: #dcfce7; border-radius: 8px; font-size: 13px;">
+                    ✅ ¡Informe generado con éxito! El documento Word se descargará en unos momentos.
                 </div>
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <h2 style="color: #005A9C; margin: 0; font-size: 22px; font-weight: bold;">HOSPITAL GENERAL DE MEDELLÍN</h2>
-                    <h3 style="color: #333; margin: 5px 0; font-size: 16px;">Luz Castro de Gutiérrez E.S.E.</h3>
-                    <p style="color: #666; margin: 0; font-size: 13px;">Departamento de Pediatría / Programa Docente Asistencial</p>
-                    <hr style="border: none; border-top: 2px solid #005A9C; margin: 15px 0;">
-                    <h2 style="color: #005A9C; margin: 15px 0; font-size: 20px; font-weight: bold;">INFORME FINAL CONSOLIDADO DE ROTACIÓN</h2>
+                <div style="text-align: center; margin-bottom: 25px;">
+                    <h2 style="color: #005A9C; margin: 0; font-size: 20px; font-weight: bold;">HOSPITAL GENERAL DE MEDELLÍN</h2>
+                    <h3 style="color: #333; margin: 4px 0; font-size: 15px;">Luz Castro de Gutiérrez E.S.E.</h3>
+                    <p style="color: #666; margin: 0; font-size: 12px;">Departamento de Pediatría / Programa Docente Asistencial</p>
+                    <hr style="border: none; border-top: 2px solid #005A9C; margin: 12px 0;">
+                    <h2 style="color: #005A9C; margin: 10px 0; font-size: 18px; font-weight: bold;">INFORME FINAL CONSOLIDADO DE ROTACIÓN</h2>
                 </div>
 
-                <div style="margin-bottom: 25px; line-height: 1.8; font-size: 14px; background: #f8fafc; padding: 15px; border-radius: 8px;">
+                <div style="margin-bottom: 20px; line-height: 1.7; font-size: 13px; background: #f8fafc; padding: 12px; border-radius: 8px;">
                     <p style="margin:0;"><strong>Residente / Fellow:</strong> ${est.nombre}</p>
                     <p style="margin:0;"><strong>Programa:</strong> ${est.programa.toUpperCase()}</p>
                     <p style="margin:0;"><strong>Rotación:</strong> ${rotacionSeleccionada}</p>
                     <p style="margin:0;"><strong>Período evaluado:</strong> ${periodoEval}</p>
                 </div>
 
-                <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 15px; text-transform: uppercase;">Calificación Promedio por Componentes</h3>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 13px;">
-                    <thead>
-                        <tr style="background-color: #005A9C; color: white;">
-                            <th style="padding: 10px; border: 1px solid #ddd; text-align: left;">Componente Evaluado</th>
-                            <th style="padding: 10px; border: 1px solid #ddd; text-align: center; width: 15%;">Peso</th>
-                            <th style="padding: 10px; border: 1px solid #ddd; text-align: center; width: 25%;">Promedio Consolidado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td style="padding: 10px; border: 1px solid #ddd;">1. Ronda Clínica (Aplicación Práctica y Criterio)</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">40%</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promRonda.toFixed(2)}</td>
-                        </tr>
-                        <tr style="background-color: #f8fafc;">
-                            <td style="padding: 10px; border: 1px solid #ddd;">2. Seminarios (Conocimientos Académicos)</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">35%</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promSeminarios.toFixed(2)}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 10px; border: 1px solid #ddd;">3. Tema Central (Investigación y Profundización)</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">20%</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promTemaCentral.toFixed(2)}</td>
-                        </tr>
-                        <tr style="background-color: #f8fafc;">
-                            <td style="padding: 10px; border: 1px solid #ddd;">4. Autoevaluación del Residente</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center;">5%</td>
-                            <td style="padding: 10px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${notaAuto.toFixed(2)}</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <h3 style="color: #005A9C; font-size: 14px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Calificación Promedio por Componentes</h3>
+                <div style="overflow-x: auto; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+                        <thead>
+                            <tr style="background-color: #005A9C; color: white;">
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Componente Evaluado</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 15%;">Peso</th>
+                                <th style="padding: 8px; border: 1px solid #ddd; text-align: center; width: 25%;">Promedio</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">1. Ronda Clínica</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">40%</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promRonda.toFixed(2)}</td>
+                            </tr>
+                            <tr style="background-color: #f8fafc;">
+                                <td style="padding: 8px; border: 1px solid #ddd;">2. Seminarios</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">35%</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promSeminarios.toFixed(2)}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd;">3. Tema Central</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">20%</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${promTemaCentral.toFixed(2)}</td>
+                            </tr>
+                            <tr style="background-color: #f8fafc;">
+                                <td style="padding: 8px; border: 1px solid #ddd;">4. Autoevaluación</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">5%</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold;">${notaAuto.toFixed(2)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
 
-                <div style="text-align: center; margin: 30px 0; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 8px;">
-                    <h2 style="margin: 0; color: ${colorNota}; font-size: 18px;">
+                <div style="text-align: center; margin: 25px 0; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 12px; border-radius: 8px;">
+                    <h2 style="margin: 0; color: ${colorNota}; font-size: 16px;">
                         NOTA DEFINITIVA: ${notaFinalDefinitiva.toFixed(2)} / 5.0 — ${calificacionCualitativa}
                     </h2>
                 </div>
 
-                <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Síntesis Cualitativa del Desempeño</h3>
-                <div style="font-size: 13.5px; text-align: justify; margin-bottom: 30px; line-height: 1.6;">
+                <h3 style="color: #005A9C; font-size: 13.5px; font-weight: bold; margin-bottom: 8px; text-transform: uppercase;">Síntesis Cualitativa del Desempeño</h3>
+                <div style="font-size: 13px; text-align: justify; margin-bottom: 25px; line-height: 1.6;">
                     ${parrafosHTML}
                 </div>
 
-                <h3 style="color: #005A9C; font-size: 15px; font-weight: bold; margin-bottom: 10px; text-transform: uppercase;">Síntesis de Comentarios de los Docentes</h3>
-                <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #005A9C; font-size: 13px; margin-bottom: 60px; line-height: 1.6;">
+                <h3 style="color: #005A9C; font-size: 13.5px; font-weight: bold; margin-bottom: 8px; text-transform: uppercase;">Síntesis de Comentarios de los Docentes</h3>
+                <div style="background-color: #f8fafc; padding: 12px; border-left: 4px solid #005A9C; font-size: 12.5px; margin-bottom: 40px; line-height: 1.6;">
                     ${resumenFeedbackCualitativo ? resumenFeedbackCualitativo.replace(/\n/g, '<br>') : '<em>No hay comentarios cualitativos registrados en el período evaluado.</em>'}
                 </div>
             </div>
@@ -964,36 +993,36 @@ async function descargarInformeWord(est, rotacion, fechas, notas, textoIA, comen
             children: [
                 new ImageRun({
                     data: logoBuffer,
-                    transformation: { width: 130, height: 130 }
+                    transformation: { width: 120, height: 120 }
                 })
             ],
-            spacing: { after: 200 }
+            spacing: { after: 150 }
         }));
     }
 
     headerChildren.push(
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 80 }, children: [
-            new TextRun({ text: 'HOSPITAL GENERAL DE MEDELLÍN', bold: true, size: 30, color: '005A9C' })
+            new TextRun({ text: 'HOSPITAL GENERAL DE MEDELLÍN', bold: true, size: 28, color: '005A9C' })
         ]}),
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 80 }, children: [
-            new TextRun({ text: 'Luz Castro de Gutiérrez E.S.E.', bold: true, size: 24, color: '333333' })
+            new TextRun({ text: 'Luz Castro de Gutiérrez E.S.E.', bold: true, size: 22, color: '333333' })
+        ]}),
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 250 }, children: [
+            new TextRun({ text: 'Departamento de Pediatría / Programa Docente Asistencial', size: 20, color: '666666' })
         ]}),
         new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [
-            new TextRun({ text: 'Departamento de Pediatría / Programa Docente Asistencial', size: 22, color: '666666' })
+            new TextRun({ text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', size: 14, color: '00A3E0' })
         ]}),
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 400 }, children: [
-            new TextRun({ text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', size: 16, color: '00A3E0' })
-        ]}),
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 400 }, children: [
-            new TextRun({ text: 'INFORME FINAL CONSOLIDADO DE ROTACIÓN', bold: true, size: 28, color: '005A9C' })
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 300 }, children: [
+            new TextRun({ text: 'INFORME FINAL CONSOLIDADO DE ROTACIÓN', bold: true, size: 26, color: '005A9C' })
         ]})
     );
 
     const infoResidente = [
-        new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: 'Residente / Fellow: ', bold: true, size: 22 }), new TextRun({ text: est.nombre, size: 22 })] }),
-        new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: 'Programa: ', bold: true, size: 22 }), new TextRun({ text: est.programa.toUpperCase(), size: 22 })] }),
-        new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: 'Rotación: ', bold: true, size: 22 }), new TextRun({ text: rotacion, size: 22 })] }),
-        new Paragraph({ spacing: { after: 400 }, children: [new TextRun({ text: 'Período evaluado: ', bold: true, size: 22 }), new TextRun({ text: fechas, size: 22 })] }),
+        new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: 'Residente / Fellow: ', bold: true, size: 22 }), new TextRun({ text: est.nombre, size: 22 })] }),
+        new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: 'Programa: ', bold: true, size: 22 }), new TextRun({ text: est.programa.toUpperCase(), size: 22 })] }),
+        new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: 'Rotación: ', bold: true, size: 22 }), new TextRun({ text: rotacion, size: 22 })] }),
+        new Paragraph({ spacing: { after: 300 }, children: [new TextRun({ text: 'Período evaluado: ', bold: true, size: 22 }), new TextRun({ text: fechas, size: 22 })] }),
     ];
 
     const tableHeader = new TableRow({
@@ -1026,42 +1055,41 @@ async function descargarInformeWord(est, rotacion, fechas, notas, textoIA, comen
 
     const notaFinalP = new Paragraph({
         alignment: AlignmentType.CENTER,
-        spacing: { before: 400, after: 400 },
+        spacing: { before: 300, after: 300 },
         children: [
-            new TextRun({ text: `NOTA DEFINITIVA: ${notaFinal.toFixed(2)} / 5.0 — ${calificacionCualitativa}`, bold: true, size: 26, color: colorNota })
+            new TextRun({ text: `NOTA DEFINITIVA: ${notaFinal.toFixed(2)} / 5.0 — ${calificacionCualitativa}`, bold: true, size: 24, color: colorNota })
         ]
     });
 
-    const iaTitle = new Paragraph({ spacing: { before: 200, after: 200 }, children: [new TextRun({ text: 'SÍNTESIS CUALITATIVA DEL DESEMPEÑO', bold: true, size: 24, color: '005A9C' })] });
+    const iaTitle = new Paragraph({ spacing: { before: 200, after: 150 }, children: [new TextRun({ text: 'SÍNTESIS CUALITATIVA DEL DESEMPEÑO', bold: true, size: 22, color: '005A9C' })] });
     const aiParagraphs = textoIA.split('\n').filter(p => p.trim() !== '').map(p => 
-        new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { after: 150 }, children: [new TextRun({ text: p.trim(), size: 22 })] })
+        new Paragraph({ alignment: AlignmentType.JUSTIFIED, spacing: { after: 120 }, children: [new TextRun({ text: p.trim(), size: 20 })] })
     );
 
-    const commentTitle = new Paragraph({ spacing: { before: 300, after: 200 }, children: [new TextRun({ text: 'SÍNTESIS DE COMENTARIOS DE LOS DOCENTES', bold: true, size: 24, color: '005A9C' })] });
+    const commentTitle = new Paragraph({ spacing: { before: 250, after: 150 }, children: [new TextRun({ text: 'SÍNTESIS DE COMENTARIOS DE LOS DOCENTES', bold: true, size: 22, color: '005A9C' })] });
     let comText = comentariosDocentes || 'No hay comentarios cualitativos registrados en el período evaluado.';
     const commentsParagraphs = comText.split('\n').map(c => 
         new Paragraph({
             alignment: AlignmentType.JUSTIFIED,
             spacing: { after: 100 },
-            children: [new TextRun({ text: c.trim(), size: 20, italics: !comentariosDocentes })]
+            children: [new TextRun({ text: c.trim(), size: 18, italics: !comentariosDocentes })]
         })
     );
 
     const firmas = [
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 1000 }, children: [new TextRun({ text: '____________________________________', size: 22 })] }),
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100 }, children: [new TextRun({ text: 'Coordinador Académico de Pediatría', bold: true, size: 22 })] }),
-        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Hospital General de Medellín - Luz Castro de Gutiérrez', size: 20, color: '666666' })] }),
-        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 100 }, children: [new TextRun({ text: `Fecha de generación: ${new Date().toLocaleDateString('es-CO')}`, size: 18, color: '999999' })] }),
-        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `IA: ${modeloUsado.replace('models/', '')}`, size: 16, color: 'BBBBBB' })] })
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 800 }, children: [new TextRun({ text: '____________________________________', size: 20 })] }),
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80 }, children: [new TextRun({ text: 'Coordinador Académico de Pediatría', bold: true, size: 20 })] }),
+        new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Hospital General de Medellín - Luz Castro de Gutiérrez', size: 18, color: '666666' })] }),
+        new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 80 }, children: [new TextRun({ text: `Fecha de generación: ${new Date().toLocaleDateString('es-CO')}`, size: 16, color: '999999' })] })
     ];
 
     const docxObj = new Document({
         sections: [{
-            properties: { page: { margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 } } },
+            properties: { page: { margin: { top: 1200, bottom: 1200, left: 1200, right: 1200 } } },
             children: [
                 ...headerChildren,
                 ...infoResidente,
-                new Paragraph({ spacing: { before: 300, after: 150 }, children: [new TextRun({ text: 'CALIFICACIÓN PROMEDIO POR COMPONENTES', bold: true, size: 20, color: '005A9C' })] }),
+                new Paragraph({ spacing: { before: 250, after: 120 }, children: [new TextRun({ text: 'CALIFICACIÓN PROMEDIO POR COMPONENTES', bold: true, size: 18, color: '005A9C' })] }),
                 table,
                 notaFinalP,
                 iaTitle,
@@ -1104,7 +1132,7 @@ if (btnDescargarWord) {
             Swal.fire('Error', 'No se pudo descargar el archivo Word.', 'error');
         } finally {
             btnDescargarWord.disabled = false;
-            btnDescargarWord.innerHTML = '<span>📄</span> Descargar Word';
+            btnDescargarWord.innerHTML = '<span>📄</span> Descargar Word (.docx)';
         }
     });
 }
@@ -1118,7 +1146,7 @@ if (btnAdminEstudiantes) {
 
 async function abrirModalGestionEstudiantes() {
     Swal.fire({
-        title: 'Cargando lista de estudiantes...',
+        title: 'Cargando residentes...',
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading()
     });
@@ -1126,44 +1154,46 @@ async function abrirModalGestionEstudiantes() {
     await cargarEstudiantesDesdeFirestore();
 
     const listaHtml = appState.estudiantes.map(est => `
-        <div class="flex justify-between items-center p-2 border-b text-sm">
+        <div class="flex justify-between items-center p-2.5 border-b text-xs sm:text-sm">
             <div class="text-left">
                 <strong>${est.nombre}</strong> 
-                <span class="text-xs px-2 py-0.5 rounded ${est.programa === 'fellow' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} font-semibold ml-2 uppercase">${est.programa}</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full ${est.programa === 'fellow' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} font-bold ml-1.5 uppercase">${est.programa}</span>
             </div>
-            <button class="btn-eliminar-est text-red-500 hover:text-red-700 text-xs px-2 py-1 font-bold" data-id="${est.id}">Eliminar</button>
+            <button class="btn-eliminar-est text-red-500 hover:text-red-700 active:scale-95 text-xs px-2 py-1 font-bold" data-id="${est.id}">Eliminar</button>
         </div>
     `).join('');
 
     const modalHtml = `
         <div class="text-left space-y-4">
-            <div class="bg-gray-50 p-3 rounded border">
-                <h4 class="font-bold text-sm text-[#0056b3] mb-2">➕ Agregar Nuevo Residente o Fellow</h4>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                    <input type="text" id="nuevo-est-nombre" placeholder="Nombre completo (ej. Dra. Laura Gómez)" class="border rounded p-2 text-sm w-full">
-                    <select id="nuevo-est-programa" class="border rounded p-2 text-sm w-full bg-white">
+            <div class="bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                <h4 class="font-bold text-xs sm:text-sm text-[#0056b3] mb-2 flex items-center gap-1.5">
+                    <span>➕</span> Agregar Nuevo Residente o Fellow
+                </h4>
+                <div class="space-y-2 mb-3">
+                    <input type="text" id="nuevo-est-nombre" placeholder="Nombre completo (ej. Dra. Laura Gómez)" class="border rounded-lg p-2.5 text-xs sm:text-sm w-full bg-white outline-none focus:border-blue-500">
+                    <select id="nuevo-est-programa" class="border rounded-lg p-2.5 text-xs sm:text-sm w-full bg-white outline-none focus:border-blue-500 font-medium">
                         <option value="residente">Residente de Pediatría</option>
                         <option value="fellow">Fellow de Cuidado Intensivo</option>
                     </select>
                 </div>
-                <button id="btn-guardar-nuevo-est" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded text-sm transition shadow-sm">
+                <button id="btn-guardar-nuevo-est" class="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold py-2.5 px-3 rounded-xl text-xs sm:text-sm transition shadow-sm">
                     Guardar Residente en Base de Datos
                 </button>
             </div>
 
             <div>
-                <h4 class="font-bold text-sm text-gray-700 mb-2">📋 Lista Actual de Residentes y Fellows (HGM):</h4>
-                <div class="max-h-48 overflow-y-auto border rounded bg-white p-2 divide-y">
-                    ${listaHtml || '<p class="text-xs text-gray-400 p-2">No hay residentes registrados aún.</p>'}
+                <h4 class="font-bold text-xs sm:text-sm text-gray-700 mb-1.5">📋 Residentes y Fellows Inscritos:</h4>
+                <div class="max-h-52 overflow-y-auto border rounded-xl bg-white p-2 divide-y">
+                    ${listaHtml || '<p class="text-xs text-gray-400 p-2 text-center">No hay residentes registrados aún.</p>'}
                 </div>
             </div>
         </div>
     `;
 
     Swal.fire({
-        title: 'Gestión de Residentes y Fellows - HGM',
+        title: 'Gestión de Residentes y Fellows',
         html: modalHtml,
-        width: '550px',
+        width: window.innerWidth < 640 ? '95%' : '540px',
         showConfirmButton: false,
         showCloseButton: true,
         didOpen: () => {
@@ -1269,7 +1299,7 @@ async function cargarUsuariosDesdeFirestore() {
 
 async function abrirModalGestionUsuarios() {
     Swal.fire({
-        title: 'Cargando lista de docentes y administradores...',
+        title: 'Cargando usuarios...',
         allowOutsideClick: false,
         didOpen: () => Swal.showLoading()
     });
@@ -1279,62 +1309,62 @@ async function abrirModalGestionUsuarios() {
     const listaHtml = appState.usuarios.map(u => {
         const esCoord = (u.rol === 'coordinador' || u.rol === 'administrador');
         const badgeColor = esCoord ? 'bg-indigo-100 text-indigo-800 border-indigo-200' : 'bg-blue-100 text-blue-800 border-blue-200';
-        const rolTexto = esCoord ? 'Coordinador / Admin' : 'Docente Evaluador';
+        const rolTexto = esCoord ? 'Coordinador' : 'Docente';
 
         return `
-            <div class="flex justify-between items-center p-2.5 border-b text-sm">
-                <div class="text-left">
+            <div class="flex justify-between items-center p-2.5 border-b text-xs sm:text-sm">
+                <div class="text-left max-w-[70%] truncate">
                     <span class="font-medium text-gray-800">${u.correo}</span>
-                    <span class="text-[11px] px-2 py-0.5 rounded-full border font-bold ml-2 ${badgeColor}">${rolTexto}</span>
+                    <span class="text-[10px] px-2 py-0.5 rounded-full border font-bold ml-1.5 ${badgeColor}">${rolTexto}</span>
                 </div>
-                <button class="btn-eliminar-usuario text-red-500 hover:text-red-700 text-xs px-2 py-1 font-bold" data-id="${u.id}" data-correo="${u.correo}">Eliminar</button>
+                <button class="btn-eliminar-usuario text-red-500 hover:text-red-700 active:scale-95 text-xs px-2 py-1 font-bold flex-shrink-0" data-id="${u.id}" data-correo="${u.correo}">Eliminar</button>
             </div>
         `;
     }).join('');
 
     const modalHtml = `
         <div class="text-left space-y-4">
-            <div class="bg-gray-50 p-3.5 rounded-lg border border-gray-200">
-                <h4 class="font-bold text-sm text-[#0056b3] mb-2 flex items-center gap-1">
+            <div class="bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                <h4 class="font-bold text-xs sm:text-sm text-[#0056b3] mb-2 flex items-center gap-1.5">
                     <span>➕</span> Registrar Nuevo Docente o Administrador
                 </h4>
                 <div class="space-y-2 mb-3">
                     <div>
                         <label class="block text-xs font-bold text-gray-700 mb-0.5">Correo Electrónico:</label>
-                        <input type="email" id="nuevo-user-email" placeholder="ejemplo@hgm.gov.co" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500">
+                        <input type="email" id="nuevo-user-email" placeholder="ejemplo@hgm.gov.co" class="border rounded-lg p-2.5 text-xs sm:text-sm w-full bg-white outline-none focus:border-blue-500">
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                             <label class="block text-xs font-bold text-gray-700 mb-0.5">Contraseña Inicial:</label>
-                            <input type="password" id="nuevo-user-password" placeholder="Mínimo 6 caracteres" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500">
+                            <input type="password" id="nuevo-user-password" placeholder="Mínimo 6 caracteres" class="border rounded-lg p-2.5 text-xs sm:text-sm w-full bg-white outline-none focus:border-blue-500">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-700 mb-0.5">Rol en la Plataforma:</label>
-                            <select id="nuevo-user-rol" class="border rounded p-2 text-sm w-full bg-white outline-none focus:border-blue-500 font-medium">
+                            <select id="nuevo-user-rol" class="border rounded-lg p-2.5 text-xs sm:text-sm w-full bg-white outline-none focus:border-blue-500 font-medium">
                                 <option value="docente">Docente Evaluador</option>
                                 <option value="coordinador">Coordinador (Administrador)</option>
                             </select>
                         </div>
                     </div>
                 </div>
-                <button id="btn-guardar-nuevo-user" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded text-sm transition shadow-sm">
+                <button id="btn-guardar-nuevo-user" class="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold py-2.5 px-3 rounded-xl text-xs sm:text-sm transition shadow-sm">
                     Crear y Autorizar Usuario
                 </button>
             </div>
 
             <div>
-                <h4 class="font-bold text-sm text-gray-700 mb-2">📋 Usuarios Registrados en el Sistema:</h4>
-                <div class="max-h-52 overflow-y-auto border rounded bg-white p-2 divide-y">
-                    ${listaHtml || '<p class="text-xs text-gray-400 p-2">No hay usuarios registrados aún.</p>'}
+                <h4 class="font-bold text-xs sm:text-sm text-gray-700 mb-1.5">📋 Usuarios Registrados en el Sistema:</h4>
+                <div class="max-h-52 overflow-y-auto border rounded-xl bg-white p-2 divide-y">
+                    ${listaHtml || '<p class="text-xs text-gray-400 p-2 text-center">No hay usuarios registrados aún.</p>'}
                 </div>
             </div>
         </div>
     `;
 
     Swal.fire({
-        title: 'Gestión de Docentes y Coordinadores - HGM',
+        title: 'Gestión de Docentes y Coordinadores',
         html: modalHtml,
-        width: '580px',
+        width: window.innerWidth < 640 ? '95%' : '560px',
         showConfirmButton: false,
         showCloseButton: true,
         didOpen: () => {
@@ -1361,7 +1391,6 @@ async function abrirModalGestionUsuarios() {
                 btnGuardar.innerHTML = '<span>⏳</span> Creando usuario en Firebase...';
 
                 try {
-                    // Instancia secundaria para NO cerrar la sesión activa del coordinador actual
                     let secondaryApp;
                     try {
                         secondaryApp = initializeApp(firebaseConfig, "SecondaryAuth");
@@ -1378,13 +1407,12 @@ async function abrirModalGestionUsuarios() {
                         await signOut(secondaryAuth);
                     } catch (authErr) {
                         if (authErr.code === 'auth/email-already-in-use') {
-                            console.log('El correo ya existe en Firebase Authentication, registrando rol en Firestore...');
+                            console.log('El correo ya existe en Firebase Auth, autorizando rol en Firestore...');
                         } else {
                             throw authErr;
                         }
                     }
 
-                    // Guardar rol en Firestore
                     await addDoc(collection(db, 'usuarios'), {
                         correo: email,
                         rol: rol,
@@ -1395,8 +1423,8 @@ async function abrirModalGestionUsuarios() {
 
                     Swal.fire({
                         icon: 'success',
-                        title: 'Usuario Creado y Autorizado',
-                        text: `${email} ahora puede ingresar con su contraseña como ${rol === 'coordinador' ? 'Coordinador' : 'Docente'}.`,
+                        title: 'Usuario Autorizado',
+                        text: `${email} ahora puede ingresar como ${rol === 'coordinador' ? 'Coordinador' : 'Docente'}.`,
                         confirmButtonColor: '#0056b3'
                     }).then(() => {
                         abrirModalGestionUsuarios();
